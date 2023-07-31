@@ -3,7 +3,7 @@ import os
 import shutil
 import subprocess
 from copy import deepcopy
-from typing import Optional
+from typing import Callable, Optional
 
 import dask
 import numpy as np
@@ -61,10 +61,10 @@ class TwoStepBlindDocking:
     def __init__(self, top_k: int = 5, segmentation_distance_threshold: float = 20.0,
                  p2rank_executable_path: str = P2RANK_EXECUTABLE, p2rank_cache_path: str = ".p2rank_cache",
                  pockets_saved_path: str = ".generated_pockets",
-                 pocket_scoring_path: str = None, pocket_scoring_model_class: type = None,
-                 pocket_scoring_model_params: dict = None,
-                 pocket_docking_path: str = None, pocket_docking_model_class: type = None,
-                 pocket_docking_model_params: dict = None,
+                 pocket_scoring_module: Callable = None, pocket_scoring_path: str = None,
+                 pocket_scoring_model_class: type = None, pocket_scoring_model_params: dict = None,
+                 pocket_docking_module: Callable = None, pocket_docking_path: str = None,
+                 pocket_docking_model_class: type = None, pocket_docking_model_params: dict = None,
                  docking_predictions_path: str = "docking_predictions",
                  scoring_batch_size: int = 32, docking_batch_size: int = 32):
         self.top_k = top_k
@@ -77,19 +77,17 @@ class TwoStepBlindDocking:
         self.pockets_saved_path = pockets_saved_path
         os.makedirs(pockets_saved_path, exist_ok=True)
 
-        if pocket_scoring_path is not None and pocket_scoring_model_class is not None:
+        self.pocket_scoring_module = pocket_scoring_module
+        if pocket_scoring_module is None and pocket_scoring_path is not None and pocket_scoring_model_class is not None:
             self.pocket_scoring_module = _load_saved_model(pocket_scoring_path, pocket_scoring_model_class,
                                                            pocket_scoring_model_params)
-            self.scoring_batch_size = scoring_batch_size
-        else:
-            self.pocket_scoring_module = None
+        self.scoring_batch_size = scoring_batch_size
 
-        if pocket_docking_path is not None and pocket_docking_model_class is not None:
+        self.pocket_docking_module = pocket_docking_module
+        if pocket_docking_module is None and pocket_docking_path is not None and pocket_docking_model_class is not None:
             self.pocket_docking_module = _load_saved_model(pocket_docking_path, pocket_docking_model_class,
                                                            pocket_docking_model_params)
-            self.docking_batch_size = docking_batch_size
-        else:
-            self.pocket_docking_module = None
+        self.docking_batch_size = docking_batch_size
 
         self.docking_predictions_path = docking_predictions_path
         os.makedirs(docking_predictions_path, exist_ok=True)
