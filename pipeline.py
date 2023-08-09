@@ -13,10 +13,11 @@ from Bio.PDB import PDBIO, PDBParser
 from dask.diagnostics import ProgressBar
 from rdkit import Chem
 from rdkit.Geometry import Point3D
-from torch_geometric.data import DataLoader, HeteroData
+from torch_geometric.data import HeteroData
+from torch_geometric.loader import DataLoader
 
-from dataloader.protein_ligand_complex import ProteinLigandComplex
 from dataloader.pdbbind_dataset import PDBBindDataset
+from dataloader.protein_ligand_complex import ProteinLigandComplex
 
 P2RANK_EXECUTABLE = "/home/dit905/dit/p2rank_24/prank"
 
@@ -218,13 +219,13 @@ class TwoStepBlindDocking:
                                        "protein_path": pl_complex.protein_path, "prediction": prediction})
         pocket_predictions = pd.DataFrame(pocket_predictions)
         pocket_predictions["ranking"] = pocket_predictions.groupby("id")["prediction"].rank(ascending=False)
-        pocket_predictions.sort_values(by=["pdb", "ranking"], ascending=True, inplace=True)
+        pocket_predictions.sort_values(by=["id", "ranking"], ascending=True, inplace=True)
         pocket_predictions["ranked_protein_path"] = pocket_predictions.apply(
             lambda row: os.path.join(os.path.dirname(row["protein_path"]),
-                                     f"{row['pdb']}_rank{int(row['ranking'])}_pocket{row['pocket_num']}.pdb"), axis=1
+                                     f"{row['id']}_rank{int(row['ranking'])}_pocket{row['pocket_num']}.pdb"), axis=1
         )
 
-        for _, _, _, protein_path, _, _, _, ranked_protein_path in pocket_predictions.itertuples():
+        for _, _, _, protein_path, _, _, ranked_protein_path in pocket_predictions.itertuples():
             shutil.move(protein_path, ranked_protein_path)
         logging.debug("Finished ranking predicted pockets.")
 
