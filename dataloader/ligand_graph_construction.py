@@ -32,46 +32,6 @@ VALID_FEATURES = {
     "possible_is_in_ring6_list": [False, True],
     "possible_is_in_ring7_list": [False, True],
     "possible_is_in_ring8_list": [False, True],
-    "possible_amino_acids": [
-        "ALA",
-        "ARG",
-        "ASN",
-        "ASP",
-        "CYS",
-        "GLN",
-        "GLU",
-        "GLY",
-        "HIS",
-        "ILE",
-        "LEU",
-        "LYS",
-        "MET",
-        "PHE",
-        "PRO",
-        "SER",
-        "THR",
-        "TRP",
-        "TYR",
-        "VAL",
-        "HIP",
-        "HIE",
-        "TPO",
-        "HID",
-        "LEV",
-        "MEU",
-        "PTR",
-        "GLV",
-        "CYT",
-        "SEP",
-        "HIZ",
-        "CYM",
-        "GLM",
-        "ASQ",
-        "TYS",
-        "CYX",
-        "GLZ",
-        "misc",
-    ],
     "possible_atom_type_2": [
         "C*",
         "CA",
@@ -263,36 +223,25 @@ def get_ligand_coordinates(ligand: Molecule) -> tuple[torch.Tensor, torch.Tensor
 
 
 def build_ligand_graph(
-    graph: HeteroData, ligand: Molecule, include_coordinates: bool = True
+    graph: HeteroData, ligand: Molecule, include_absolute_coordinates: bool = True
 ) -> HeteroData:
     """
-    Obtain a graph from an RDKit ligand strcuture and add to a Pytorch Geometric HeteroData graph.
+    Obtain a graph from an RDKit ligand structure and add to a Pytorch Geometric HeteroData graph.
     :param graph: graph object to hold the graph data.
     :param ligand: RDKit structure.
-    :param include_coordinates: whether to include the absolute coordinates in the data.
+    :param include_absolute_coordinates: whether to include the absolute coordinates in the data.
     :return: the modified HeteroData graph.
     """
     node_features = get_ligand_features(ligand)
     edge_index, edge_features = get_ligand_edges(ligand)
 
     relative_coordinates, absolute_coordinates = get_ligand_coordinates(ligand)
-    graph["ligand"].coordinates = relative_coordinates
-    if include_coordinates:
+    graph["ligand"].pos = relative_coordinates
+    if include_absolute_coordinates:
         graph["ligand"].absolute_coordinates = absolute_coordinates
 
-    graph["ligand"].node_features = node_features
+    graph["ligand"].x = node_features
     graph["ligand", "bond", "ligand"].edge_index = edge_index
-    graph["ligand", "bond", "ligand"].edge_features = edge_features
+    graph["ligand", "bond", "ligand"].edge_attr = edge_features
 
     return graph
-
-"""from rdkit.Chem import MolFromMol2File, MolFromSmiles
-from rdkit.Chem.rdDistGeom import EmbedMolecule
-from rdkit.Chem.AllChem import AddHs
-if __name__ == '__main__':
-    ligand = MolFromMol2File("/home/diego/Universidad/Harvard/Lab/docking/data/PDBBind_processed/1a1c/1a1c_ligand.mol2")
-    ligand = AddHs(ligand)
-    EmbedMolecule(ligand)
-    graph = HeteroData()
-    graph = build_ligand_graph(graph, ligand)
-    print(graph)"""

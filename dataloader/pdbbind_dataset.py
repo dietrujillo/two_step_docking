@@ -1,69 +1,106 @@
 import logging
-from typing import Any, Callable, Optional
 
 from Bio.PDB import PDBParser
-from rdkit.Chem import MolFromSmiles, SDMolSupplier, AddHs
+from rdkit.Chem import MolFromSmiles, MolFromMol2File, SDMolSupplier, AddHs
 from rdkit.Chem.rdDistGeom import EmbedMolecule
 from torch_geometric.data import Dataset, HeteroData
 
-from dataloader.protein_ligand_complex import ProteinLigandComplex
-from dataloader.protein_graph_construction import build_protein_graph
 from dataloader.ligand_graph_construction import build_ligand_graph
+from dataloader.protein_graph_construction import build_protein_graph
+from dataloader.protein_ligand_complex import ProteinLigandComplex
 
 
 class PDBBindDataset(Dataset):
     def __init__(
         self,
         data: list[ProteinLigandComplex],
-        include_coordinates: bool = True,
+        include_label: bool = False,
+        include_absolute_coordinates: bool = True,
         include_hydrogen: bool = False,
-        root: Optional[str] = None,
-        transform: Optional[Callable[..., Any]] = None,
-        pre_transform: Optional[Callable[..., Any]] = None,
-        pre_filter: Optional[Callable[..., Any]] = None,
+        **kwargs
     ):
-        super().__init__(root, transform, pre_transform, pre_filter)
+        """
+        The PDBBind dataset.
+        :param data: a list of ProteinLigandComplex objects containing the paths to proteins and ligands.
+        :param include_label: whether to include the true label in the data batches.
+        :param include_absolute_coordinates: whether to include the absolute (true) coordinates in the ligand.
+        :param include_hydrogen: whether to add hydrogen atoms to the ligand graph
+        """
+        super().__init__(**kwargs)
         self.data = data
-        self.include_coordinates = include_coordinates
+        self.include_label = include_label
+        self.include_absolute_coordinates = include_absolute_coordinates
         self.include_hydrogen = include_hydrogen
 
     def len(self) -> int:
+        """
+        Return the size of the dataset.
+        :return: length of the dataset.
+        """
         return len(self.data)
 
     def _add_protein_graph(self, graph: HeteroData):
+        """
+        Add protein (receptor) information to the protein-ligand complex graph.
+        :param graph: HeteroData object to which protein information will be added. Will be modified in place.
+        :return: the modified graph.
+        """
         pdbparser = PDBParser()
         protein = pdbparser.get_structure(graph["name"], graph["protein_path"])
         graph = build_protein_graph(
-            graph, protein, include_coordinates=self.include_coordinates
+            graph, protein, include_coordinates=self.include_absolute_coordinates
         )
         return graph
 
     def _add_ligand_graph(self, graph: HeteroData):
-        include_coordinates = self.include_coordinates
-        if graph["ligand_path"] is not None:
-            supplier = SDMolSupplier(graph["ligand_path"])
-            ligand = supplier.__getitem__(0)
+        """
+        Add ligand information to the protein-ligand complex graph.
+        :param graph: HeteroData object to which ligand information will be added. Will be modified in place.
+        :return: the modified graph.
+        """
+        include_absolute_coordinates = self.include_absolute_coordinates
+        if graph["ligand_path"] != {}:
+            if graph["ligand_path"].endswith(".sdf"):
+                supplier = SDMolSupplier(graph["ligand_path"])
+                ligand = supplier.__getitem__(0)
+            elif graph["ligand_path"].endswith(".mol2"):
+                ligand = MolFromMol2File(graph["ligand_path"])
+            else:
+                raise ValueError(f"Input ligand file must be either .sdf or .mol2 file. Got {graph['ligand_path']}")
         else:
             ligand = MolFromSmiles(graph["ligand_smiles"])
             EmbedMolecule(ligand)
-            if self.include_coordinates:
+            if self.include_absolute_coordinates:
                 logging.warning(
                     f"The protein-ligand complex {graph['name']} was loaded from a SMILES string but "
-                    "PDBBindDataset.include_coordinates is True. "
+                    "PDBBindDataset.include_absolute_coordinates is True. "
                     "If you need to include true coordinates for the ligand, provide a path to a "
                     ".sdf file instead of SMILES."
                 )
-                include_coordinates = False
-
+                include_absolute_coordinates = False
         if self.include_hydrogen:
-            AddHs(ligand)
+            ligand = AddHs(ligand)
         graph["rdkit_ligand"] = ligand
         graph = build_ligand_graph(
-            graph, ligand, include_coordinates=include_coordinates
+            graph, ligand, include_absolute_coordinates=include_absolute_coordinates
         )
         return graph
 
-    def get(self, index: int) -> HeteroData:
+    def _compute_label(self, pl_complex: ProteinLigandComplex) -> float:
+        """
+        Compute true labels from the ProteinLigandComplex information.
+        :param pl_complex: ProteinLigandComplex object containing paths to the protein and ligand files. In this
+         function, a ligand SMILES does not suffice, as we need the true ligand coordinates to compute the label.
+        :return: the item label as a float number measuring whether the pocket is the closest to the ligand.
+        """
+        raise NotImplementedError
+
+    def get(self, index: int) -> HeteroData | tuple[HeteroData, float]:
+        """
+        Retrieve graph at a given index.
+        :param index: index of the data to get.
+        :return: a HeteroData graph with protein and ligand graphs, as well as a label when self.include_label is True.
+        """
         pl_complex = self.data[index]
         out = HeteroData()
         out["name"] = pl_complex.name
@@ -74,4 +111,7 @@ class PDBBindDataset(Dataset):
         out = self._add_protein_graph(out)
         out = self._add_ligand_graph(out)
 
+        if self.include_label:
+            label = self._compute_label(pl_complex)
+            return out, label
         return out
