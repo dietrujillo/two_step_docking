@@ -65,7 +65,7 @@ def get_clean_protein(protein: Structure):
     return protein
 
 
-def get_protein_coordinates(protein: Structure) -> tuple[torch.Tensor, torch.Tensor]:
+def get_protein_coordinates(protein: Structure) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Obtain 3D coordinates of the protein residues.
     :param protein: biopython protein structure.
@@ -79,7 +79,7 @@ def get_protein_coordinates(protein: Structure) -> tuple[torch.Tensor, torch.Ten
     absolute_coordinates = torch.tensor(coordinates)
     centroid = torch.mean(absolute_coordinates, dim=0)
     relative_coordinates = absolute_coordinates - centroid
-    return relative_coordinates, absolute_coordinates
+    return relative_coordinates, absolute_coordinates, centroid
 
 
 def get_protein_features(protein: Structure) -> torch.Tensor:
@@ -116,25 +116,22 @@ def get_protein_edges(coordinates: torch.Tensor, cutoff: float) -> tuple[torch.T
     return edge_index, None
 
 
-def build_protein_graph(graph: HeteroData, protein: Structure,
-                        include_coordinates: bool = True, cutoff: float = 15) -> HeteroData:
+def build_protein_graph(graph: HeteroData, protein: Structure, cutoff: float = 15) -> HeteroData:
     """
     Obtain a graph from a BioPython protein Structure and add to a PyTorch HeteroData object as a graph.
     :param graph: HeteroData object to which the protein will be added.
     :param protein: the protein as a BioPython Structure object.
-    :param include_coordinates: whether to include the absolute coordinates in the graph. If False, only the
-     relative coordinates centered around the origin will be used.
     :param cutoff: the cutoff threshold for the distance graph, in angstroms.
     :return: the HeteroData graph, modified in place, containing protein information.
     """
     protein = get_clean_protein(protein)
-    relative_coordinates, absolute_coordinates = get_protein_coordinates(protein)
+    relative_coordinates, absolute_coordinates, centroid = get_protein_coordinates(protein)
     node_features = get_protein_features(protein)
     edge_index, edge_features = get_protein_edges(relative_coordinates, cutoff=cutoff)
 
     graph["protein"].pos = relative_coordinates
-    if include_coordinates:
-        graph["protein"].absolute_coordinates = absolute_coordinates
+    graph["protein"].absolute_coordinates = absolute_coordinates
+    graph["centroid"] = centroid
 
     graph["protein"].x = node_features
     graph["protein", "bond", "protein"].edge_index = edge_index

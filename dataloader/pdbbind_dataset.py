@@ -39,7 +39,7 @@ class PDBBindDataset(Dataset):
         """
         return len(self.data)
 
-    def _add_protein_graph(self, graph: HeteroData):
+    def _add_protein_graph(self, graph: HeteroData) -> HeteroData:
         """
         Add protein (receptor) information to the protein-ligand complex graph.
         :param graph: HeteroData object to which protein information will be added. Will be modified in place.
@@ -47,12 +47,10 @@ class PDBBindDataset(Dataset):
         """
         pdbparser = PDBParser()
         protein = pdbparser.get_structure(graph["name"], graph["protein_path"])
-        graph = build_protein_graph(
-            graph, protein, include_coordinates=self.include_absolute_coordinates
-        )
+        graph = build_protein_graph(graph, protein)
         return graph
 
-    def _add_ligand_graph(self, graph: HeteroData):
+    def _add_ligand_graph(self, graph: HeteroData) -> HeteroData:
         """
         Add ligand information to the protein-ligand complex graph.
         :param graph: HeteroData object to which ligand information will be added. Will be modified in place.
@@ -81,9 +79,7 @@ class PDBBindDataset(Dataset):
         if self.include_hydrogen:
             ligand = AddHs(ligand)
         graph["rdkit_ligand"] = ligand
-        graph = build_ligand_graph(
-            graph, ligand, include_absolute_coordinates=include_absolute_coordinates
-        )
+        graph = build_ligand_graph(graph, ligand, include_absolute_coordinates=include_absolute_coordinates)
         return graph
 
     def _compute_label(self, pl_complex: ProteinLigandComplex) -> float:

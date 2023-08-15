@@ -2,6 +2,7 @@ import logging
 import os
 import shutil
 import subprocess
+from collections import defaultdict
 from copy import deepcopy
 from typing import Callable, Optional
 
@@ -13,6 +14,8 @@ from Bio.PDB import PDBIO, PDBParser
 from dask.diagnostics import ProgressBar
 from rdkit import Chem
 from rdkit.Geometry import Point3D
+from spyrmsd import molecule
+from spyrmsd.rmsd import symmrmsd
 from torch_geometric.data import HeteroData
 from torch_geometric.loader import DataLoader
 
@@ -29,7 +32,7 @@ def _load_saved_model(model_path: str, model_class: type, model_parameters: dict
     :param model_path: Path to the model file containing the weights in a state_dict.
     :param model_class: Python class of the model.
     :param model_parameters: Additional parameters to be passed to the model constructor.
-    :return:
+    :return: torch module ready to be used.
     """
     logging.info(f"Loading saved model of class {model_class} from {model_path}...")
     model = model_class(**model_parameters)
@@ -40,20 +43,20 @@ def _load_saved_model(model_path: str, model_class: type, model_parameters: dict
     return model
 
 
-def _graph_to_sdf(graph: HeteroData, output_path: str, ignore_hydrogen: bool = True):
+def _graph_to_sdf(graph: HeteroData, output_path: str):
     """
     Saves a PyTorch Geometric molecular graph to a .sdf file using RDKit.
 
     :param graph: PyG HeteroData object containing an RDKit Molecule object with molecular information
     and ligand coordinates.
     :param output_path: where to save the .sdf file.
-    :param ignore_hydrogen: whether to ignore hydrogen atoms in the saved file (default: True).
     """
     rdkit_ligand = deepcopy(graph["rdkit_ligand"])
-    ligand_coordinates = graph['ligand'].coordinates.cpu().numpy()[int(ignore_hydrogen)]
+    ligand_coordinates = graph['ligand'].pos.cpu().numpy()
     conformer = rdkit_ligand.GetConformer()
     for i in range(rdkit_ligand.GetNumAtoms()):
         conformer.SetAtomPosition(i, Point3D(*ligand_coordinates[i]))
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     Chem.SDWriter(output_path).write(rdkit_ligand, confId=0)
 
 
@@ -237,6 +240,11 @@ class TwoStepBlindDocking:
         logging.debug("Finished ranking predicted pockets.")
 
     def check_ranked_pockets_in_cache(self, pl_complexes: list[ProteinLigandComplex]) -> bool:
+        """
+        Check whether the ranked pockets are already present in disk.
+        :param pl_complexes: complexes containing complex ID.
+        :return: boolean indicating whether the data is in the cache or not.
+        """
         if not os.path.exists(self.pockets_saved_path):
             return False
         for pl_complex in pl_complexes:
@@ -293,17 +301,16 @@ class TwoStepBlindDocking:
         top_pockets = []
         for pl_complex in pl_complexes:
             pdb_pockets_dir = os.path.join(self.pockets_saved_path, pl_complex.name)
-            for pocket in sorted(
-                    filter(lambda x: x.startswith(f"{pl_complex.name}_rank"), os.listdir(pdb_pockets_dir)))[
-                          :self.top_k]:
+            for pocket in sorted(filter(lambda x: x.startswith(f"{pl_complex.name}_rank"), os.listdir(pdb_pockets_dir)),
+                                 key=lambda x: int(x.split("rank")[1][:-4]))[:self.top_k]:
                 top_pockets.append(ProteinLigandComplex(name=pl_complex.name,
-                                                        protein_path=os.path.join(
-                                                            os.path.dirname(pl_complex.protein_path), pocket),
+                                                        protein_path=os.path.join(pdb_pockets_dir, pocket),
                                                         ligand_path=pl_complex.ligand_path,
                                                         ligand_smiles=pl_complex.ligand_smiles))
         return top_pockets
 
-    def dock_to_pocket(self, pl_complexes: list[ProteinLigandComplex], predicted_ligands_path: str = None):
+    def dock_to_pocket(self, pl_complexes: list[ProteinLigandComplex], predicted_ligands_path: str = None,
+                       save_results: bool = True):
         """
         Perform molecular docking using a pretrained model.
 
@@ -311,30 +318,33 @@ class TwoStepBlindDocking:
             the ligand .sdf or .mol2.
         :param predicted_ligands_path: path to saved predicted ligand positions. If None,
             defaults to self.docking_predictions_path.
+        :param save_results: whether to save the predictions to .sdf files or simply return them.
         """
         if predicted_ligands_path is None:
             predicted_ligands_path = self.docking_predictions_path
 
         logging.info("Running prediction module...")
-        loader = DataLoader(PDBBindDataset(pl_complexes, include_coordinates=True), shuffle=False,
+        loader = DataLoader(PDBBindDataset(pl_complexes, include_absolute_coordinates=False), shuffle=False,
                             batch_size=self.docking_batch_size)
         predictions = []
         for batch in loader:
             predictions.extend(self.pocket_docking_module(batch))
 
-        logging.info(f"Prediction module finished successfully. Saving predictions to {predicted_ligands_path}...")
+        if save_results:
+            logging.info(f"Prediction module finished successfully. Saving predictions to {predicted_ligands_path}...")
+            for pl_complex, prediction in zip(pl_complexes, predictions):
+                _graph_to_sdf(prediction,
+                              os.path.join(predicted_ligands_path, pl_complex.name,
+                                           f"{os.path.basename(pl_complex.protein_path)[:-4]}_ligand_prediction.sdf"))
+        return predictions
 
-        for pl_complex, prediction in zip(pl_complexes, predictions):
-            _graph_to_sdf(prediction,
-                          os.path.join(predicted_ligands_path, pl_complex.name,
-                                       f"{os.path.basename(pl_complex.protein_path)[:-4]}_ligand_prediction.sdf"))
-
-    def predict(self, pl_complexes: list[ProteinLigandComplex]):
+    def predict(self, pl_complexes: list[ProteinLigandComplex], return_pockets: bool = False):
         """
         Run the full prediction pipeline on a list of protein-ligand complexes.
 
         :param pl_complexes: a list of ProteinLigandComplexes, containing ID, path to the protein,
         and either path to the ligand .sdf or ligand SMILES.
+        :param return_pockets: whether to return the segmented pockets along with the predicted ligand positions.
         """
         logging.info("[START] Running prediction on the protein-ligand complexes...")
 
@@ -342,4 +352,51 @@ class TwoStepBlindDocking:
         assert self.pocket_docking_module is not None, "Pocket docking module not found. Prediction is not possible."
 
         segmented_ranked_pockets = self.get_pockets(pl_complexes)
-        self.dock_to_pocket(segmented_ranked_pockets)
+        predictions = self.dock_to_pocket(segmented_ranked_pockets)
+        if return_pockets:
+            return predictions, segmented_ranked_pockets
+        return predictions
+
+    def evaluate(self, pl_complexes: list[ProteinLigandComplex]):
+        shutil.rmtree(self.docking_predictions_path)
+        predictions, pockets = self.predict(pl_complexes, return_pockets=True)
+        rmsd_dict = defaultdict(lambda: [])
+        for pl_complex in pockets:
+            prediction_molecule_file = os.path.join(
+                self.docking_predictions_path, pl_complex.name,
+                f"{os.path.basename(pl_complex.protein_path)[:-4]}_ligand_prediction.sdf"
+            )
+            supplier = Chem.SDMolSupplier(prediction_molecule_file)
+            predicted_molecule = supplier.__getitem__(0)
+            assert predicted_molecule is not None
+
+            predicted_molecule = molecule.Molecule.from_rdkit(predicted_molecule)
+
+            if pl_complex.ligand_path.endswith(".sdf"):
+                supplier = Chem.SDMolSupplier(pl_complex.ligand_path)
+                true_molecule = molecule.Molecule.from_rdkit(supplier.__getitem__(0))
+            elif pl_complex.ligand_path.endswith(".mol2"):
+                true_molecule = molecule.Molecule.from_rdkit(Chem.MolFromMol2File(pl_complex.ligand_path))
+            else:
+                raise ValueError(f"Input ligand file must be either .sdf or .mol2 file. Got {pl_complex.ligand_path}")
+
+            rmsd = symmrmsd(
+                predicted_molecule.coordinates,
+                true_molecule.coordinates,
+                predicted_molecule.atomicnums,
+                true_molecule.atomicnums,
+                predicted_molecule.adjacency_matrix,
+                true_molecule.adjacency_matrix,
+            )
+
+            rmsd_dict[pl_complex.name].append(rmsd)
+
+        top_k_rmsd_list = [sorted(lst)[0] for lst in rmsd_dict.values()]
+
+        results = {
+            "rmsd_under_1A": len(list(filter(lambda x: x <= 1, top_k_rmsd_list))) / len(top_k_rmsd_list),
+            "rmsd_under_2A": len(list(filter(lambda x: x <= 2, top_k_rmsd_list))) / len(top_k_rmsd_list),
+            "rmsd_under_5A": len(list(filter(lambda x: x <= 5, top_k_rmsd_list))) / len(top_k_rmsd_list),
+        }
+
+        return results
