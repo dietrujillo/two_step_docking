@@ -208,7 +208,7 @@ def get_ligand_edges(ligand: Molecule) -> tuple[torch.Tensor, torch.Tensor]:
     return edge_index, edge_features
 
 
-def get_ligand_coordinates(ligand: Molecule, centroid: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+def get_ligand_coordinates(ligand: Molecule, centroid: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Obtain ligand coordinates in 3D space from an RDKit Mol object as well as relative to the ligand centroid.
     :param ligand: the RDKit ligand structure.
@@ -221,11 +221,11 @@ def get_ligand_coordinates(ligand: Molecule, centroid: torch.Tensor) -> tuple[to
         centroid = torch.mean(absolute_coordinates, dim=0)
     relative_coordinates = absolute_coordinates - centroid
 
-    return relative_coordinates, absolute_coordinates
+    return relative_coordinates, absolute_coordinates, centroid
 
 
 def build_ligand_graph(
-    graph: HeteroData, ligand: Molecule, include_absolute_coordinates: bool = True) -> HeteroData:
+    graph: HeteroData, ligand: Molecule, include_absolute_coordinates: bool = True, use_ligand_centroid: bool = False) -> HeteroData:
     """
     Obtain a graph from an RDKit ligand structure and add to a Pytorch Geometric HeteroData graph.
     :param graph: graph object to hold the graph data.
@@ -236,9 +236,12 @@ def build_ligand_graph(
     node_features = get_ligand_features(ligand)
     edge_index, edge_features = get_ligand_edges(ligand)
 
-    relative_coordinates, absolute_coordinates = get_ligand_coordinates(
-        ligand, graph["centroid"] if "centroid" in graph else None
+    relative_coordinates, absolute_coordinates, centroid = get_ligand_coordinates(
+        ligand, graph["centroid"] if "centroid" in graph and not use_ligand_centroid else None
     )
+    if use_ligand_centroid:
+        graph["ligand_centroid"] = centroid
+
     graph["ligand"].pos = relative_coordinates
     if include_absolute_coordinates:
         graph["ligand"].absolute_coordinates = absolute_coordinates

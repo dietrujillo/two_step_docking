@@ -1,5 +1,8 @@
 import logging
+import os
 
+import pandas as pd
+import torch
 from Bio.PDB import PDBParser
 from rdkit.Chem import MolFromSmiles, MolFromMol2File, SDMolSupplier, AddHs
 from rdkit.Chem.rdDistGeom import EmbedMolecule
@@ -17,6 +20,8 @@ class PDBBindDataset(Dataset):
         include_label: bool = False,
         include_absolute_coordinates: bool = True,
         include_hydrogen: bool = False,
+        use_ligand_centroid: bool = False,
+        pocket_predictions_dir: str = ".p2rank_cache/p2rank_output",
         **kwargs
     ):
         """
@@ -31,6 +36,8 @@ class PDBBindDataset(Dataset):
         self.include_label = include_label
         self.include_absolute_coordinates = include_absolute_coordinates
         self.include_hydrogen = include_hydrogen
+        self.use_ligand_centroid = use_ligand_centroid
+        self.pocket_predictions_dir = pocket_predictions_dir
 
     def len(self) -> int:
         """
@@ -38,6 +45,15 @@ class PDBBindDataset(Dataset):
         :return: length of the dataset.
         """
         return len(self.data)
+
+    def get_pocket_centroid(self, pl_complex: ProteinLigandComplex) -> torch.Tensor:
+        pocket_num = int(os.path.basename(pl_complex.protein_path).split("_")[1].split(".")[0].split("_")[0])
+        p2rank_predictions = pd.read_csv(
+            os.path.join(self.pocket_predictions_dir, f"{os.path.basename(pl_complex.name.split('_')[0])}_protein_processed.pdb_predictions.csv"))
+        pocket_prediction = p2rank_predictions.iloc[pocket_num]
+        pocket_centroid = torch.Tensor(
+            [pocket_prediction["   center_x"], pocket_prediction["   center_y"], pocket_prediction["   center_z"]])
+        return pocket_centroid
 
     def _add_protein_graph(self, graph: HeteroData) -> HeteroData:
         """
@@ -79,7 +95,8 @@ class PDBBindDataset(Dataset):
         if self.include_hydrogen:
             ligand = AddHs(ligand)
         graph["rdkit_ligand"] = ligand
-        graph = build_ligand_graph(graph, ligand, include_absolute_coordinates=include_absolute_coordinates)
+        graph = build_ligand_graph(graph, ligand, include_absolute_coordinates=include_absolute_coordinates,
+                                   use_ligand_centroid=self.use_ligand_centroid)
         return graph
 
     def _compute_label(self, pl_complex: ProteinLigandComplex) -> float:
@@ -103,6 +120,7 @@ class PDBBindDataset(Dataset):
         out["protein_path"] = pl_complex.protein_path
         out["ligand_path"] = pl_complex.ligand_path
         out["ligand_smiles"] = pl_complex.ligand_smiles
+        out["pocket_centroid"] = self.get_pocket_centroid(pl_complex)
 
         out = self._add_protein_graph(out)
         out = self._add_ligand_graph(out)

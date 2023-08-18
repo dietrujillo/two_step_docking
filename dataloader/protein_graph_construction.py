@@ -59,7 +59,7 @@ def get_clean_protein(protein: Structure):
                 invalid_residues.append(residue.id)
             atom_names = Counter([atom.name for atom in residue.get_atoms()])
             if atom_names["N"] == 0 or atom_names["C"] == 0 or atom_names["CA"] != 1:
-                invalid_residues.append(residue.id)
+                invalid_residues.append(residue)
         for residue in invalid_residues:
             chain.detach_child(residue.id)
     return protein

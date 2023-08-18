@@ -13,7 +13,7 @@ class LigandDistanceScoring:
     This class is only meant to be used for code testing.
     """
 
-    def __init__(self, p2rank_output_folder: str = ".p2rank_cache/p2rank_output") -> None:
+    def __init__(self, p2rank_output_folder: str = ".p2rank_cache/p2rank_output"):
         super().__init__()
         self.p2rank_output_folder = p2rank_output_folder
 
