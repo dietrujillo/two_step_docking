@@ -65,6 +65,7 @@ class TwoStepBlindDocking:
     def __init__(self, top_k: int = 5, segmentation_distance_threshold: float = 20.0,
                  p2rank_executable_path: str = P2RANK_EXECUTABLE, p2rank_cache_path: str = ".p2rank_cache",
                  pockets_saved_path: str = ".generated_pockets",
+                 ranked_pockets_path: str = ".ranked_pockets",
                  use_cached_pockets: bool = False,
                  pocket_scoring_module: Callable = None, pocket_scoring_path: str = None,
                  pocket_scoring_model_class: type = None, pocket_scoring_model_params: dict = None,
@@ -81,6 +82,9 @@ class TwoStepBlindDocking:
 
         self.pockets_saved_path = pockets_saved_path
         os.makedirs(pockets_saved_path, exist_ok=True)
+
+        self.ranked_pockets_path = ranked_pockets_path
+        os.makedirs(ranked_pockets_path, exist_ok=True)
 
         self.use_cached_pockets = use_cached_pockets
 
@@ -203,17 +207,19 @@ class TwoStepBlindDocking:
             and either path to the ligand .sdf or .mol2 or ligand SMILES.
         """
         data = []
+        shutil.rmtree(self.ranked_pockets_path)
         for pl_complex in pl_complexes:
+            os.makedirs(os.path.join(self.ranked_pockets_path, pl_complex.name))
             pockets = os.listdir(os.path.join(self.pockets_saved_path, pl_complex.name))
             if len(pockets) > 1:
                 for i, pocket in enumerate(pockets):
-                    data.append(ProteinLigandComplex(f"{pl_complex.name}_{i}",
+                    data.append(ProteinLigandComplex(f"{pl_complex.name}_{int(pocket.split('_')[1][:-4])}",
                                                      os.path.join(self.pockets_saved_path, pl_complex.name, pocket),
                                                      pl_complex.ligand_path, pl_complex.ligand_smiles))
             else:
-                shutil.move(os.path.join(self.pockets_saved_path, pl_complex.name, pockets[0]),
-                            os.path.join(self.pockets_saved_path, pl_complex.name,
-                                         f"{pockets[0].split('_')[0]}_rank1.pdb"))
+                shutil.copyfile(os.path.join(self.pockets_saved_path, pl_complex.name, pockets[0]),
+                                os.path.join(self.ranked_pockets_path, pl_complex.name,
+                                             f"{pockets[0][:-4]}_rank1.pdb"))
 
         logging.info("Running ligand-dependent pocket scoring model...")
         dataset = PDBBindDataset(data, include_absolute_coordinates=False)
@@ -228,15 +234,16 @@ class TwoStepBlindDocking:
             pocket_predictions.append({"id": pl_complex.name.split("_")[0], "pocket_num": pl_complex.name.split("_")[1],
                                        "protein_path": pl_complex.protein_path, "prediction": prediction})
         pocket_predictions = pd.DataFrame(pocket_predictions)
-        pocket_predictions["ranking"] = pocket_predictions.groupby("id")["prediction"].rank(ascending=False)
+        pocket_predictions["ranking"] = pocket_predictions.groupby("id")["prediction"].rank(ascending=True)
         pocket_predictions.sort_values(by=["id", "ranking"], ascending=True, inplace=True)
         pocket_predictions["ranked_protein_path"] = pocket_predictions.apply(
-            lambda row: os.path.join(os.path.dirname(row["protein_path"]),
-                                     f"{row['id']}_rank{int(row['ranking'])}.pdb"), axis=1
+            lambda row: os.path.join(self.ranked_pockets_path,
+                                     row["id"],
+                                     f"{row['id']}_{row['pocket_num']}_rank{int(row['ranking'])}.pdb"), axis=1
         )
 
         for _, _, _, protein_path, _, _, ranked_protein_path in pocket_predictions.itertuples():
-            shutil.move(protein_path, ranked_protein_path)
+            shutil.copyfile(protein_path, ranked_protein_path)
         logging.debug("Finished ranking predicted pockets.")
 
     def check_ranked_pockets_in_cache(self, pl_complexes: list[ProteinLigandComplex]) -> bool:
@@ -250,11 +257,6 @@ class TwoStepBlindDocking:
         for pl_complex in pl_complexes:
             if pl_complex.name not in os.listdir(self.pockets_saved_path):
                 return False
-            else:
-                for pdb in filter(lambda x: x.endswith(".pdb"),
-                                  os.listdir(os.path.join(self.pockets_saved_path, pl_complex.name))):
-                    if "rank" not in pdb:
-                        return False
         return True
 
     def get_pockets(self, pl_complexes: list[ProteinLigandComplex],
@@ -286,22 +288,23 @@ class TwoStepBlindDocking:
             self._generate_segmented_pockets(protein_ids=[pl_complex.name for pl_complex in pl_complexes],
                                              protein_paths=[pl_complex.protein_path for pl_complex in pl_complexes],
                                              p2rank_output_folder=p2rank_output_folder)
-
-            if self.pocket_scoring_module is not None:
-                logging.info("Running ligand-dependent pocket scoring and ranking...")
-                self._rank_pockets(pl_complexes)
-            else:
-                logging.info("No pocket scoring module was supplied. Pocket ranking was not performed.")
-                return None
         else:
-            logging.info(f"Found ranked pockets in {self.pockets_saved_path}. Skipping pocket segmentation and ranking."
-                         f" To perform segmentation and ranking anyway, set skip_ranked_pockets to False.")
+            logging.info(f"Found ranked pockets in {self.pockets_saved_path}. Skipping pocket segmentation."
+                         f" To perform segmentation anyway, set use_cached_pockets to False.")
+
+        if self.pocket_scoring_module is not None:
+            logging.info("Running ligand-dependent pocket scoring and ranking...")
+            self._rank_pockets(pl_complexes)
+        else:
+            logging.info("No pocket scoring module was supplied. Pocket ranking was not performed.")
+            return None
 
         logging.info(f"Choosing top {self.top_k} pockets for each PDB...")
         top_pockets = []
         for pl_complex in pl_complexes:
-            pdb_pockets_dir = os.path.join(self.pockets_saved_path, pl_complex.name)
-            for pocket in sorted(filter(lambda x: x.startswith(f"{pl_complex.name}_rank"), os.listdir(pdb_pockets_dir)),
+            pdb_pockets_dir = os.path.join(self.ranked_pockets_path, pl_complex.name)
+            for pocket in sorted(filter(lambda x: x.startswith(pl_complex.name) and "_rank" in x,
+                                        os.listdir(pdb_pockets_dir)),
                                  key=lambda x: int(x.split("rank")[1][:-4]))[:self.top_k]:
                 top_pockets.append(ProteinLigandComplex(name=pl_complex.name,
                                                         protein_path=os.path.join(pdb_pockets_dir, pocket),
@@ -324,8 +327,8 @@ class TwoStepBlindDocking:
             predicted_ligands_path = self.docking_predictions_path
 
         logging.info("Running prediction module...")
-        loader = DataLoader(PDBBindDataset(pl_complexes, include_absolute_coordinates=False), shuffle=False,
-                            batch_size=self.docking_batch_size)
+        loader = DataLoader(PDBBindDataset(pl_complexes, include_absolute_coordinates=False, use_ligand_centroid=True),
+                            shuffle=False, batch_size=self.docking_batch_size)
         predictions = []
         for batch in loader:
             predictions.extend(self.pocket_docking_module(batch))
@@ -357,7 +360,7 @@ class TwoStepBlindDocking:
             return predictions, segmented_ranked_pockets
         return predictions
 
-    def evaluate(self, pl_complexes: list[ProteinLigandComplex]):
+    def evaluate(self, pl_complexes: list[ProteinLigandComplex]) -> dict:
         shutil.rmtree(self.docking_predictions_path)
         predictions, pockets = self.predict(pl_complexes, return_pockets=True)
         rmsd_dict = defaultdict(lambda: [])
