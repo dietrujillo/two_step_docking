@@ -4,7 +4,6 @@ import subprocess
 
 from rdkit.Chem import SDMolSupplier
 from torch_geometric.data import Batch
-from tqdm import tqdm
 
 from dataloader.ligand_graph_construction import build_ligand_graph
 from pipeline import _graph_to_sdf
@@ -43,7 +42,7 @@ class SMINADocking:
     def __call__(self, batch: Batch):
         batch = batch.to_data_list()
         os.makedirs(self.tempdir, exist_ok=True)
-        for item in tqdm(batch):
+        for item in batch:
             self.run_smina(item)
         shutil.rmtree(self.tempdir)
         return batch

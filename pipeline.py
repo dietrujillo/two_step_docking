@@ -331,7 +331,7 @@ class TwoStepBlindDocking:
         loader = DataLoader(PDBBindDataset(pl_complexes, include_absolute_coordinates=False, use_ligand_centroid=True),
                             shuffle=False, batch_size=self.docking_batch_size)
         predictions = []
-        for batch in loader:
+        for batch in tqdm(loader):
             predictions.extend(self.pocket_docking_module(batch))
 
         if save_results:

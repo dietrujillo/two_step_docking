@@ -28,6 +28,7 @@ if __name__ == '__main__':
         pocket_docking_module=SMINADocking(smina_path="/home/diego/Universidad/Harvard/Lab/methods/smina.static"),
         top_k=1,
         scoring_batch_size=1,
+        docking_batch_size=1,
         use_cached_pockets=True
     )
 
