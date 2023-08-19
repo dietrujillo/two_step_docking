@@ -67,7 +67,7 @@ class TwoStepBlindDocking:
                  p2rank_executable_path: str = P2RANK_EXECUTABLE, p2rank_cache_path: str = ".p2rank_cache",
                  pockets_saved_path: str = ".generated_pockets",
                  ranked_pockets_path: str = ".ranked_pockets",
-                 use_cached_pockets: bool = False,
+                 ignore_cache: bool = False,
                  pocket_scoring_module: Callable = None, pocket_scoring_path: str = None,
                  pocket_scoring_model_class: type = None, pocket_scoring_model_params: dict = None,
                  pocket_docking_module: Callable = None, pocket_docking_path: str = None,
@@ -87,7 +87,7 @@ class TwoStepBlindDocking:
         self.ranked_pockets_path = ranked_pockets_path
         os.makedirs(ranked_pockets_path, exist_ok=True)
 
-        self.use_cached_pockets = use_cached_pockets
+        self.ignore_cache = ignore_cache
 
         self.pocket_scoring_module = pocket_scoring_module
         if pocket_scoring_module is None and pocket_scoring_path is not None and pocket_scoring_model_class is not None:
@@ -275,7 +275,7 @@ class TwoStepBlindDocking:
         """
         p2rank_output_folder = os.path.join(self.p2rank_cache_path, p2rank_output_folder_name)
 
-        if not self.use_cached_pockets or not self.check_ranked_pockets_in_cache(pl_complexes):
+        if self.ignore_cache or not self.check_ranked_pockets_in_cache(pl_complexes):
 
             shutil.rmtree(self.p2rank_cache_path)
             shutil.rmtree(self.pockets_saved_path)
@@ -291,7 +291,7 @@ class TwoStepBlindDocking:
                                              p2rank_output_folder=p2rank_output_folder)
         else:
             logging.info(f"Found pockets in {self.pockets_saved_path}. Skipping pocket segmentation."
-                         f" To perform segmentation anyway, set use_cached_pockets to False.")
+                         f" To perform segmentation anyway, set the --ignore_cache flag.")
 
         if self.pocket_scoring_module is not None:
             logging.info("Running ligand-dependent pocket scoring and ranking...")
