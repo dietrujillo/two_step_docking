@@ -8,3 +8,5 @@ data/
 .generated_pockets/
 .p2rank_cache/
 p2rank_input_file.txt
+/.ranked_pockets/
+/docking_predictions/
