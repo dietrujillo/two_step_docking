@@ -1,5 +1,6 @@
 import logging
 import os
+from typing import Union
 
 import pandas as pd
 import torch
@@ -108,7 +109,7 @@ class PDBBindDataset(Dataset):
         """
         raise NotImplementedError
 
-    def get(self, index: int) -> HeteroData | tuple[HeteroData, float]:
+    def get(self, index: int) -> Union[HeteroData, tuple[HeteroData, float]]:
         """
         Retrieve graph at a given index.
         :param index: index of the data to get.

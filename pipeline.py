@@ -18,6 +18,7 @@ from spyrmsd import molecule
 from spyrmsd.rmsd import symmrmsd
 from torch_geometric.data import HeteroData
 from torch_geometric.loader import DataLoader
+from tqdm import tqdm
 
 from dataloader.pdbbind_dataset import PDBBindDataset
 from dataloader.protein_ligand_complex import ProteinLigandComplex
@@ -225,7 +226,7 @@ class TwoStepBlindDocking:
         dataset = PDBBindDataset(data, include_absolute_coordinates=False)
         loader = DataLoader(dataset, shuffle=False, batch_size=self.scoring_batch_size)
         predictions = []
-        for batch in loader:
+        for batch in tqdm(loader):
             predictions.extend(self.pocket_scoring_module(batch))
 
         logging.debug("Ranking individual pockets...")
@@ -289,7 +290,7 @@ class TwoStepBlindDocking:
                                              protein_paths=[pl_complex.protein_path for pl_complex in pl_complexes],
                                              p2rank_output_folder=p2rank_output_folder)
         else:
-            logging.info(f"Found ranked pockets in {self.pockets_saved_path}. Skipping pocket segmentation."
+            logging.info(f"Found pockets in {self.pockets_saved_path}. Skipping pocket segmentation."
                          f" To perform segmentation anyway, set use_cached_pockets to False.")
 
         if self.pocket_scoring_module is not None:
