@@ -13,10 +13,10 @@ SMINA_PATH = "./smina"
 
 class SMINADocking:
     def __init__(self, smina_path: str = SMINA_PATH, tempdir: str = ".tmp_smina",
-                 autobox_size: float = 8, exhaustiveness: float = 16):
+                 box_size: float = 20, exhaustiveness: float = 16):
         self.smina_path = smina_path
         self.tempdir = tempdir
-        self.autobox_size = autobox_size
+        self.box_size = box_size
         self.exhaustiveness = exhaustiveness
 
     def run_smina(self, item):
@@ -28,8 +28,11 @@ class SMINADocking:
             ligand_path = item["ligand_path"]
 
         output_path = os.path.join(self.tempdir, "output.sdf")
-        command = (f"{self.smina_path} -r {item['protein_path']} -l {ligand_path} --autobox_ligand {ligand_path} "
-                   f"--autobox_add {self.autobox_size} --exhaustiveness {self.exhaustiveness} "
+        x, y, z = item["pocket_centroid"]
+        command = (f"{self.smina_path} -r {item['protein_path']} -l {ligand_path} "
+                   f"--center_x={x} --center_y={y} --center_z={z} "
+                   f"--size_x={self.box_size} --size_y={self.box_size} --size_z={self.box_size} "
+                   f"--exhaustiveness {self.exhaustiveness} "
                    f"-o {output_path} -q").split()
         subprocess.run(command, stdout=subprocess.DEVNULL)
 
