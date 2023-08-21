@@ -34,10 +34,13 @@ class SMINADocking:
         subprocess.run(command, stdout=subprocess.DEVNULL)
 
         supplier = SDMolSupplier(output_path)
-        item["rdkit_ligand"] = supplier.__getitem__(0)
-        item = build_ligand_graph(item, item["rdkit_ligand"])
-        item["ligand"].pos += item["centroid"]
-        return item
+        ligand = supplier.__getitem__(0)
+        if ligand is not None:
+            item["rdkit_ligand"] = ligand
+            item = build_ligand_graph(item, ligand)
+            item["ligand"].pos += item["centroid"]
+            return item
+        return None
 
     def __call__(self, batch: Batch):
         batch = batch.to_data_list()

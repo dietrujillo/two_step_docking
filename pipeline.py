@@ -372,28 +372,30 @@ class TwoStepBlindDocking:
             )
             supplier = Chem.SDMolSupplier(prediction_molecule_file)
             predicted_molecule = supplier.__getitem__(0)
-            assert predicted_molecule is not None
+            if predicted_molecule is not None:
 
-            predicted_molecule = molecule.Molecule.from_rdkit(predicted_molecule)
+                predicted_molecule = molecule.Molecule.from_rdkit(predicted_molecule)
 
-            if pl_complex.ligand_path.endswith(".sdf"):
-                supplier = Chem.SDMolSupplier(pl_complex.ligand_path)
-                true_molecule = molecule.Molecule.from_rdkit(supplier.__getitem__(0))
-            elif pl_complex.ligand_path.endswith(".mol2"):
-                true_molecule = molecule.Molecule.from_rdkit(Chem.MolFromMol2File(pl_complex.ligand_path))
+                if pl_complex.ligand_path.endswith(".sdf"):
+                    supplier = Chem.SDMolSupplier(pl_complex.ligand_path)
+                    true_molecule = molecule.Molecule.from_rdkit(supplier.__getitem__(0))
+                elif pl_complex.ligand_path.endswith(".mol2"):
+                    true_molecule = molecule.Molecule.from_rdkit(Chem.MolFromMol2File(pl_complex.ligand_path))
+                else:
+                    raise ValueError(f"Input ligand file must be either .sdf or .mol2 file. Got {pl_complex.ligand_path}")
+
+                rmsd = symmrmsd(
+                    predicted_molecule.coordinates,
+                    true_molecule.coordinates,
+                    predicted_molecule.atomicnums,
+                    true_molecule.atomicnums,
+                    predicted_molecule.adjacency_matrix,
+                    true_molecule.adjacency_matrix,
+                )
+
+                rmsd_dict[pl_complex.name].append(rmsd)
             else:
-                raise ValueError(f"Input ligand file must be either .sdf or .mol2 file. Got {pl_complex.ligand_path}")
-
-            rmsd = symmrmsd(
-                predicted_molecule.coordinates,
-                true_molecule.coordinates,
-                predicted_molecule.atomicnums,
-                true_molecule.atomicnums,
-                predicted_molecule.adjacency_matrix,
-                true_molecule.adjacency_matrix,
-            )
-
-            rmsd_dict[pl_complex.name].append(rmsd)
+                logging.error(f"Ligand for PDB {pl_complex.name} was not readable. Skipping it in the evaluation.")
 
         top_k_rmsd_list = [sorted(lst)[0] for lst in rmsd_dict.values()]
 

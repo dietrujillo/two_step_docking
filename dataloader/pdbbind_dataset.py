@@ -51,9 +51,14 @@ class PDBBindDataset(Dataset):
         pocket_num = int(os.path.basename(pl_complex.protein_path).split("_")[1].split(".")[0].split("_")[0])
         p2rank_predictions = pd.read_csv(
             os.path.join(self.pocket_predictions_dir, f"{os.path.basename(pl_complex.name.split('_')[0])}_protein_processed.pdb_predictions.csv"))
-        pocket_prediction = p2rank_predictions.iloc[pocket_num]
-        pocket_centroid = torch.Tensor(
-            [pocket_prediction["   center_x"], pocket_prediction["   center_y"], pocket_prediction["   center_z"]])
+        try:
+            pocket_prediction = p2rank_predictions.iloc[pocket_num]
+            pocket_centroid = torch.Tensor(
+                [pocket_prediction["   center_x"], pocket_prediction["   center_y"], pocket_prediction["   center_z"]])
+        except IndexError:
+            if len(p2rank_predictions) != 0:
+                logging.error(f"pocket_centroid exception when accessing p2rank prediction table. {len(p2rank_predictions)=}, {pocket_num=}")
+            return None
         return pocket_centroid
 
     def _add_protein_graph(self, graph: HeteroData) -> HeteroData:
@@ -95,11 +100,12 @@ class PDBBindDataset(Dataset):
                 include_absolute_coordinates = False
         if self.include_hydrogen:
             ligand = AddHs(ligand)
+            
         graph["rdkit_ligand"] = ligand
         graph = build_ligand_graph(graph, ligand, include_absolute_coordinates=include_absolute_coordinates,
-                                   use_ligand_centroid=self.use_ligand_centroid)
+                                    use_ligand_centroid=self.use_ligand_centroid)
         return graph
-
+        
     def _compute_label(self, pl_complex: ProteinLigandComplex) -> float:
         """
         Compute true labels from the ProteinLigandComplex information.
@@ -125,6 +131,9 @@ class PDBBindDataset(Dataset):
 
         out = self._add_protein_graph(out)
         out = self._add_ligand_graph(out)
+        
+        if out["pocket_centroid"] is None:
+            out["pocket_centroid"] == out["centroid"]
 
         if self.include_label:
             label = self._compute_label(pl_complex)
