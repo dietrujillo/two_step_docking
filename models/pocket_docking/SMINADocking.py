@@ -13,9 +13,13 @@ SMINA_PATH = "./smina"
 
 class SMINADocking:
     def __init__(self, smina_path: str = SMINA_PATH, tempdir: str = ".tmp_smina",
+                 data_path: str = "../../data/PDBBind_processed",
+                 use_whole_protein: bool = True,
                  box_size: float = 20, exhaustiveness: float = 16):
         self.smina_path = smina_path
         self.tempdir = tempdir
+        self.data_path = data_path
+        self.use_whole_protein = use_whole_protein
         self.box_size = box_size
         self.exhaustiveness = exhaustiveness
 
@@ -29,7 +33,9 @@ class SMINADocking:
 
         output_path = os.path.join(self.tempdir, "output.sdf")
         x, y, z = item["pocket_centroid"]
-        command = (f"{self.smina_path} -r {item['protein_path']} -l {ligand_path} "
+        pdb = item["name"]
+        protein_path = os.path.join(self.data_path, pdb, f'{pdb}_protein_processed.pdb') if self.use_whole_protein else item["protein_path"]
+        command = (f"{self.smina_path} -r {protein_path} -l {ligand_path} "
                    f"--center_x={x} --center_y={y} --center_z={z} "
                    f"--size_x={self.box_size} --size_y={self.box_size} --size_z={self.box_size} "
                    f"--exhaustiveness {self.exhaustiveness} "

@@ -134,7 +134,7 @@ class PDBBindDataset(Dataset):
         out = self._add_protein_graph(out)
         out = self._add_ligand_graph(out)
         
-        if out["pocket_centroid"] is None:
+        if out["pocket_centroid"] == {}:
             out["pocket_centroid"] = out["centroid"]
 
         if self.include_label:
