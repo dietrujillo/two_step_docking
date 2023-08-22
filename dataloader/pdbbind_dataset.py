@@ -59,7 +59,7 @@ class PDBBindDataset(Dataset):
         except IndexError:
             if len(p2rank_predictions) != 0:
                 logging.error(f"pocket_centroid exception when accessing p2rank prediction table. "
-                              f"{len(p2rank_predictions)=}, {pocket_num=}")
+                              f"{pl_complex.name=}, {pl_complex.protein_path}, {len(p2rank_predictions)=}, {pocket_num=}")
             return None
         return pocket_centroid
 
@@ -129,12 +129,14 @@ class PDBBindDataset(Dataset):
         out["protein_path"] = pl_complex.protein_path
         out["ligand_path"] = pl_complex.ligand_path
         out["ligand_smiles"] = pl_complex.ligand_smiles
-        out["pocket_centroid"] = self.get_pocket_centroid(pl_complex)
 
         out = self._add_protein_graph(out)
         out = self._add_ligand_graph(out)
-        
-        if out["pocket_centroid"] == {}:
+
+        centroid = self.get_pocket_centroid(pl_complex)
+        if centroid is not None:
+            out["pocket_centroid"] = centroid
+        else:
             out["pocket_centroid"] = out["centroid"]
 
         if self.include_label:

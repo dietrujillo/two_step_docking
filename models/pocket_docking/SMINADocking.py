@@ -3,7 +3,7 @@ import shutil
 import subprocess
 
 from rdkit.Chem import SDMolSupplier
-from torch_geometric.data import Batch
+from torch_geometric.data import Batch, HeteroData
 
 from dataloader.ligand_graph_construction import build_ligand_graph
 from pipeline import _graph_to_sdf
@@ -23,7 +23,7 @@ class SMINADocking:
         self.box_size = box_size
         self.exhaustiveness = exhaustiveness
 
-    def run_smina(self, item):
+    def run_smina(self, item: HeteroData):
         if "ligand_path" not in item:
             ligand_path = os.path.join(self.tempdir, "ligand.sdf")
             item["ligand"].pos -= item["ligand_centroid"]
