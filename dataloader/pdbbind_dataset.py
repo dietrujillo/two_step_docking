@@ -5,7 +5,7 @@ from typing import Union, Optional
 import pandas as pd
 import torch
 from Bio.PDB import PDBParser
-from rdkit.Chem import MolFromSmiles, MolFromMol2File, SDMolSupplier, AddHs
+from rdkit.Chem import MolFromSmiles, MolFromMol2File, SDMolSupplier, AddHs, MolToSmiles
 from rdkit.Chem.rdDistGeom import EmbedMolecule
 from torch_geometric.data import Dataset, HeteroData
 
@@ -20,7 +20,7 @@ class PDBBindDataset(Dataset):
         data: list[ProteinLigandComplex],
         include_label: bool = False,
         include_absolute_coordinates: bool = True,
-        include_hydrogen: bool = False,
+        include_hydrogen: bool = True,
         use_ligand_centroid: bool = False,
         pocket_predictions_dir: str = ".p2rank_cache/p2rank_output",
         **kwargs
@@ -47,21 +47,19 @@ class PDBBindDataset(Dataset):
         """
         return len(self.data)
 
-    def get_pocket_centroid(self, pl_complex: ProteinLigandComplex) -> Optional[torch.Tensor]:
+    def get_pocket_prediction(self, pl_complex: ProteinLigandComplex) -> tuple[int, Optional[pd.Series]]:
         pocket_num = int(os.path.basename(pl_complex.protein_path).split("_")[1].split(".")[0].split("_")[0])
         p2rank_predictions = pd.read_csv(
             os.path.join(self.pocket_predictions_dir,
-                         f"{os.path.basename(pl_complex.name.split('_')[0])}_protein_processed.pdb_predictions.csv"))
+                         f"{os.path.basename(pl_complex.name.split('_')[0])}_protein.pdb_predictions.csv"))
         try:
             pocket_prediction = p2rank_predictions.iloc[pocket_num]
-            pocket_centroid = torch.Tensor(
-                [pocket_prediction["   center_x"], pocket_prediction["   center_y"], pocket_prediction["   center_z"]])
         except IndexError:
             if len(p2rank_predictions) != 0:
                 logging.error(f"pocket_centroid exception when accessing p2rank prediction table. "
-                              f"{pl_complex.name=}, {pl_complex.protein_path}, {len(p2rank_predictions)=}, {pocket_num=}")
-            return None
-        return pocket_centroid
+                              f"{pl_complex.name=}, {pl_complex.protein_path=}, {len(p2rank_predictions)=}, {pocket_num=}")
+            return 0, None
+        return pocket_num, pocket_prediction
 
     def _add_protein_graph(self, graph: HeteroData) -> HeteroData:
         """
@@ -81,16 +79,10 @@ class PDBBindDataset(Dataset):
         :return: the modified graph.
         """
         include_absolute_coordinates = self.include_absolute_coordinates
-        if graph["ligand_path"] != {}:
-            if graph["ligand_path"].endswith(".sdf"):
-                supplier = SDMolSupplier(graph["ligand_path"])
-                ligand = supplier.__getitem__(0)
-            elif graph["ligand_path"].endswith(".mol2"):
-                ligand = MolFromMol2File(graph["ligand_path"])
-            else:
-                raise ValueError(f"Input ligand file must be either .sdf or .mol2 file. Got {graph['ligand_path']}")
-        else:
+        if graph["ligand_smiles"] != {}:
             ligand = MolFromSmiles(graph["ligand_smiles"])
+            if self.include_hydrogen:
+                ligand = AddHs(ligand)
             EmbedMolecule(ligand)
             if self.include_absolute_coordinates:
                 logging.warning(
@@ -100,8 +92,20 @@ class PDBBindDataset(Dataset):
                     ".sdf file instead of SMILES."
                 )
                 include_absolute_coordinates = False
-        if self.include_hydrogen:
-            ligand = AddHs(ligand)
+        else:
+            if graph["ligand_path"].endswith(".sdf"):
+                supplier = SDMolSupplier(graph["ligand_path"])
+                ligand = supplier.__getitem__(0)
+            elif graph["ligand_path"].endswith(".mol2"):
+                ligand = MolFromMol2File(graph["ligand_path"])
+            else:
+                raise ValueError(f"Input ligand file must be either .sdf or .mol2 file. Got {graph['ligand_path']}")
+            if self.include_hydrogen:
+                ligand = AddHs(ligand)
+
+        if graph["ligand_smiles"] == {}:
+            del graph["ligand_smiles"]
+            graph["ligand_smiles"] = MolToSmiles(ligand)
             
         graph["rdkit_ligand"] = ligand
         graph = build_ligand_graph(graph, ligand, include_absolute_coordinates=include_absolute_coordinates,
@@ -133,8 +137,12 @@ class PDBBindDataset(Dataset):
         out = self._add_protein_graph(out)
         out = self._add_ligand_graph(out)
 
-        centroid = self.get_pocket_centroid(pl_complex)
-        if centroid is not None:
+        pocket_num, pocket_prediction = self.get_pocket_prediction(pl_complex)
+        out["pocket_num"] = pocket_num
+        out["pocket_prediction"] = pocket_prediction
+        if pocket_prediction is not None:
+            centroid = torch.Tensor(
+                [pocket_prediction["   center_x"], pocket_prediction["   center_y"], pocket_prediction["   center_z"]])
             out["pocket_centroid"] = centroid
         else:
             out["pocket_centroid"] = out["centroid"]

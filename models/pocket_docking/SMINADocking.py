@@ -1,6 +1,7 @@
 import os
 import shutil
 import subprocess
+from typing import Optional
 
 from rdkit.Chem import SDMolSupplier
 from torch_geometric.data import Batch, HeteroData
@@ -23,38 +24,37 @@ class SMINADocking:
         self.box_size = box_size
         self.exhaustiveness = exhaustiveness
 
-    def run_smina(self, item: HeteroData):
-        if "ligand_path" not in item:
-            ligand_path = os.path.join(self.tempdir, "ligand.sdf")
-            item["ligand"].pos -= item["ligand_centroid"]
-            _graph_to_sdf(item, ligand_path)
-        else:
-            ligand_path = item["ligand_path"]
+    def run_smina(self, item: HeteroData) -> Optional[HeteroData]:
+        input_ligand_path = os.path.join(self.tempdir, "ligand.sdf")
+        item["ligand"].pos -= item["ligand_centroid"]
+        #item["ligand"].pos += item["pocket_centroid"]
+        _graph_to_sdf(item, input_ligand_path)
 
         output_path = os.path.join(self.tempdir, "output.sdf")
         x, y, z = item["pocket_centroid"]
         pdb = item["name"]
-        protein_path = os.path.join(self.data_path, pdb, f'{pdb}_protein_processed.pdb') if self.use_whole_protein else item["protein_path"]
-        command = (f"{self.smina_path} -r {protein_path} -l {ligand_path} "
+        protein_path = os.path.join(self.data_path, pdb, f'{pdb}_protein.pdb') if self.use_whole_protein else item["protein_path"]
+        command = (f"{self.smina_path} -r {protein_path} -l {input_ligand_path} "
                    f"--center_x={x} --center_y={y} --center_z={z} "
                    f"--size_x={self.box_size} --size_y={self.box_size} --size_z={self.box_size} "
                    f"--exhaustiveness {self.exhaustiveness} "
                    f"-o {output_path} -q").split()
-        subprocess.run(command, stdout=subprocess.DEVNULL)
+        subprocess.run(command)#, stdout=subprocess.DEVNULL)
 
-        supplier = SDMolSupplier(output_path)
-        ligand = supplier.__getitem__(0)
-        if ligand is not None:
-            item["rdkit_ligand"] = ligand
-            item = build_ligand_graph(item, ligand)
-            item["ligand"].pos += item["centroid"]
-            return item
+        if os.path.exists(output_path):
+            supplier = SDMolSupplier(output_path)
+            ligand = supplier.__getitem__(0)
+            if ligand is not None:
+                item["rdkit_ligand"] = ligand
+                item = build_ligand_graph(item, ligand)
+                item["ligand"].pos += item["centroid"]
+                return item
         return None
 
     def __call__(self, batch: Batch):
         batch = batch.to_data_list()
         os.makedirs(self.tempdir, exist_ok=True)
-        for item in batch:
-            self.run_smina(item)
+        for i, item in enumerate(batch):
+            batch[i] = self.run_smina(item)
         shutil.rmtree(self.tempdir)
         return batch

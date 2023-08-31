@@ -217,11 +217,12 @@ def get_ligand_coordinates(ligand: Molecule, centroid: torch.Tensor) -> tuple[to
     """
     absolute_coordinates = torch.tensor(ligand.GetConformer().GetPositions())
 
+    ligand_centroid = torch.mean(absolute_coordinates, dim=0)
     if centroid is None:
-        centroid = torch.mean(absolute_coordinates, dim=0)
+        centroid = ligand_centroid
     relative_coordinates = absolute_coordinates - centroid
 
-    return relative_coordinates, absolute_coordinates, centroid
+    return relative_coordinates, absolute_coordinates, ligand_centroid
 
 
 def build_ligand_graph(
@@ -236,11 +237,10 @@ def build_ligand_graph(
     node_features = get_ligand_features(ligand)
     edge_index, edge_features = get_ligand_edges(ligand)
 
-    relative_coordinates, absolute_coordinates, centroid = get_ligand_coordinates(
+    relative_coordinates, absolute_coordinates, ligand_centroid = get_ligand_coordinates(
         ligand, graph["centroid"] if "centroid" in graph and not use_ligand_centroid else None
     )
-    if use_ligand_centroid:
-        graph["ligand_centroid"] = centroid
+    graph["ligand_centroid"] = ligand_centroid
 
     graph["ligand"].pos = relative_coordinates
     if include_absolute_coordinates:

@@ -214,9 +214,10 @@ class TwoStepBlindDocking:
             pockets = os.listdir(os.path.join(self.pockets_saved_path, pl_complex.name))
             if len(pockets) > 1:
                 for i, pocket in enumerate(pockets):
-                    data.append(ProteinLigandComplex(f"{pl_complex.name}_{int(pocket.split('_')[1][:-4])}",
-                                                     os.path.join(self.pockets_saved_path, pl_complex.name, pocket),
-                                                     pl_complex.ligand_path, pl_complex.ligand_smiles))
+                    data.append(ProteinLigandComplex(name=f"{pl_complex.name}_{int(pocket.split('_')[1][:-4])}",
+                                                     protein_path=os.path.join(self.pockets_saved_path, pl_complex.name, pocket),
+                                                     ligand_path=pl_complex.ligand_path, ligand_smiles=pl_complex.ligand_smiles,
+                                                     ligand_reference_path=pl_complex.ligand_reference_path))
             else:
                 shutil.copyfile(os.path.join(self.pockets_saved_path, pl_complex.name, pockets[0]),
                                 os.path.join(self.ranked_pockets_path, pl_complex.name,
@@ -310,7 +311,8 @@ class TwoStepBlindDocking:
                 top_pockets.append(ProteinLigandComplex(name=pl_complex.name,
                                                         protein_path=os.path.join(pdb_pockets_dir, pocket),
                                                         ligand_path=pl_complex.ligand_path,
-                                                        ligand_smiles=pl_complex.ligand_smiles))
+                                                        ligand_smiles=pl_complex.ligand_smiles,
+                                                        ligand_reference_path=pl_complex.ligand_reference_path))
         return top_pockets
 
     def dock_to_pocket(self, pl_complexes: list[ProteinLigandComplex], predicted_ligands_path: str = None,
@@ -336,7 +338,7 @@ class TwoStepBlindDocking:
 
         if save_results:
             logging.info(f"Prediction module finished successfully. Saving predictions to {predicted_ligands_path}...")
-            for pl_complex, prediction in zip(pl_complexes, predictions):
+            for pl_complex, prediction in filter(lambda x: x[1] is not None, zip(pl_complexes, predictions)):
                 _graph_to_sdf(prediction,
                               os.path.join(predicted_ligands_path, pl_complex.name,
                                            f"{os.path.basename(pl_complex.protein_path)[:-4]}_ligand_prediction.sdf"))
@@ -370,20 +372,27 @@ class TwoStepBlindDocking:
                 self.docking_predictions_path, pl_complex.name,
                 f"{os.path.basename(pl_complex.protein_path)[:-4]}_ligand_prediction.sdf"
             )
-            supplier = Chem.SDMolSupplier(prediction_molecule_file)
-            predicted_molecule = supplier.__getitem__(0)
+            try:
+                supplier = Chem.SDMolSupplier(prediction_molecule_file)
+                predicted_molecule = supplier.__getitem__(0)
+            except OSError:
+                predicted_molecule = None
+
             if predicted_molecule is not None:
 
                 predicted_molecule = molecule.Molecule.from_rdkit(predicted_molecule)
 
+                true_ligand_path = pl_complex.ligand_reference_path if pl_complex.ligand_reference_path is not None else pl_complex.ligand_path
                 if pl_complex.ligand_path.endswith(".sdf"):
-                    supplier = Chem.SDMolSupplier(pl_complex.ligand_path)
+                    supplier = Chem.SDMolSupplier(true_ligand_path)
                     true_molecule = molecule.Molecule.from_rdkit(supplier.__getitem__(0))
                 elif pl_complex.ligand_path.endswith(".mol2"):
-                    true_molecule = molecule.Molecule.from_rdkit(Chem.MolFromMol2File(pl_complex.ligand_path))
+                    true_molecule = molecule.Molecule.from_rdkit(Chem.MolFromMol2File(true_ligand_path))
                 else:
                     raise ValueError(f"Input ligand file must be either .sdf or .mol2 file. Got {pl_complex.ligand_path}")
 
+                print(f"{true_molecule=}, {true_molecule.coordinates.shape}")
+                print(f"{predicted_molecule=}, {predicted_molecule.coordinates.shape=}")
                 rmsd = symmrmsd(
                     predicted_molecule.coordinates,
                     true_molecule.coordinates,

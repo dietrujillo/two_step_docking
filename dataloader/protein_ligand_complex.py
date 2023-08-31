@@ -8,6 +8,7 @@ class ProteinLigandComplex:
     protein_path: str
     ligand_path: Optional[str] = None
     ligand_smiles: Optional[str] = None
+    ligand_reference_path: Optional[str] = None
 
     def __post_init__(self):
         assert self.name is not None
