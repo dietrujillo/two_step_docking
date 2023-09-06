@@ -61,6 +61,18 @@ class PDBBindDataset(Dataset):
             return 0, None
         return pocket_num, pocket_prediction
 
+    def _read_ligand(self, ligand_path: str, include_hydrogen: bool = True):
+        if ligand_path.endswith(".sdf"):
+            supplier = SDMolSupplier(ligand_path)
+            ligand = supplier.__getitem__(0)
+        elif ligand_path.endswith(".mol2"):
+            ligand = MolFromMol2File(ligand_path)
+        else:
+            raise ValueError(f"Input ligand file must be either .sdf or .mol2 file. Got {ligand_path}")
+        if include_hydrogen:
+            ligand = AddHs(ligand)
+        return ligand
+
     def _add_protein_graph(self, graph: HeteroData) -> HeteroData:
         """
         Add protein (receptor) information to the protein-ligand complex graph.
@@ -93,21 +105,17 @@ class PDBBindDataset(Dataset):
                 )
                 include_absolute_coordinates = False
         else:
-            if graph["ligand_path"].endswith(".sdf"):
-                supplier = SDMolSupplier(graph["ligand_path"])
-                ligand = supplier.__getitem__(0)
-            elif graph["ligand_path"].endswith(".mol2"):
-                ligand = MolFromMol2File(graph["ligand_path"])
-            else:
-                raise ValueError(f"Input ligand file must be either .sdf or .mol2 file. Got {graph['ligand_path']}")
-            if self.include_hydrogen:
-                ligand = AddHs(ligand)
+            ligand = self._read_ligand(graph["ligand_path"], include_hydrogen=self.include_hydrogen)
+        graph["rdkit_ligand"] = ligand
+
+        if graph["ligand_reference_path"] != {}:
+            reference_ligand = self._read_ligand(graph["ligand_reference_path"], include_hydrogen=self.include_hydrogen)
+            graph["rdkit_reference_ligand"] = reference_ligand
 
         if graph["ligand_smiles"] == {}:
             del graph["ligand_smiles"]
             graph["ligand_smiles"] = MolToSmiles(ligand)
-            
-        graph["rdkit_ligand"] = ligand
+
         graph = build_ligand_graph(graph, ligand, include_absolute_coordinates=include_absolute_coordinates,
                                    use_ligand_centroid=self.use_ligand_centroid)
         return graph
@@ -133,6 +141,8 @@ class PDBBindDataset(Dataset):
         out["protein_path"] = pl_complex.protein_path
         out["ligand_path"] = pl_complex.ligand_path
         out["ligand_smiles"] = pl_complex.ligand_smiles
+        if pl_complex.ligand_reference_path is not None:
+            out["ligand_reference_path"] = pl_complex.ligand_reference_path
 
         out = self._add_protein_graph(out)
         out = self._add_ligand_graph(out)

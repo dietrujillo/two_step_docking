@@ -30,7 +30,11 @@ class DebugScoring:
         results = []
         batch = batch.to_data_list()
         for item in batch:
-            ligand_center = ComputeCentroid(item["rdkit_ligand"].GetConformer())
+            if item["rdkit_reference_ligand"] != {}:
+                reference_ligand = item["rdkit_reference_ligand"]
+            else:
+                reference_ligand = item["rdkit_ligand"]
+            ligand_center = ComputeCentroid(reference_ligand.GetConformer())
             ligand_center = torch.Tensor([ligand_center.x, ligand_center.y, ligand_center.z])
             distance = torch.norm(ligand_center - item["pocket_centroid"])
             results.append(distance)
