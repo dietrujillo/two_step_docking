@@ -5,13 +5,14 @@ from typing import Union, Optional
 import pandas as pd
 import torch
 from Bio.PDB import PDBParser
-from rdkit.Chem import MolFromSmiles, MolFromMol2File, SDMolSupplier, AddHs, MolToSmiles
+from rdkit.Chem import MolFromSmiles, AddHs, MolToSmiles
 from rdkit.Chem.rdDistGeom import EmbedMolecule
 from torch_geometric.data import Dataset, HeteroData
 
 from dataloader.ligand_graph_construction import build_ligand_graph
 from dataloader.protein_graph_construction import build_protein_graph
 from dataloader.protein_ligand_complex import ProteinLigandComplex
+from io_utils import read_ligand
 
 
 class PDBBindDataset(Dataset):
@@ -61,18 +62,6 @@ class PDBBindDataset(Dataset):
             return 0, None
         return pocket_num, pocket_prediction
 
-    def _read_ligand(self, ligand_path: str, include_hydrogen: bool = True):
-        if ligand_path.endswith(".sdf"):
-            supplier = SDMolSupplier(ligand_path)
-            ligand = supplier.__getitem__(0)
-        elif ligand_path.endswith(".mol2"):
-            ligand = MolFromMol2File(ligand_path)
-        else:
-            raise ValueError(f"Input ligand file must be either .sdf or .mol2 file. Got {ligand_path}")
-        if include_hydrogen:
-            ligand = AddHs(ligand)
-        return ligand
-
     def _add_protein_graph(self, graph: HeteroData) -> HeteroData:
         """
         Add protein (receptor) information to the protein-ligand complex graph.
@@ -105,11 +94,11 @@ class PDBBindDataset(Dataset):
                 )
                 include_absolute_coordinates = False
         else:
-            ligand = self._read_ligand(graph["ligand_path"], include_hydrogen=self.include_hydrogen)
+            ligand = read_ligand(graph["ligand_path"], include_hydrogen=self.include_hydrogen)
         graph["rdkit_ligand"] = ligand
 
         if graph["ligand_reference_path"] != {}:
-            reference_ligand = self._read_ligand(graph["ligand_reference_path"], include_hydrogen=self.include_hydrogen)
+            reference_ligand = read_ligand(graph["ligand_reference_path"], include_hydrogen=self.include_hydrogen)
             graph["rdkit_reference_ligand"] = reference_ligand
 
         if graph["ligand_smiles"] == {}:

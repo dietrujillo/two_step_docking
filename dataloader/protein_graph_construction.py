@@ -106,9 +106,6 @@ def get_protein_edges(coordinates: torch.Tensor, cutoff: float) -> tuple[torch.T
     :return: the edge index and edge feature tensors.
     """
 
-    # TODO: for now, no edge attributes. When attributes are added, the interface will likely
-    #  change to include the protein Structure object.
-
     distances = torch.cdist(coordinates, coordinates)
     adjacency_matrix = torch.where(distances < cutoff, 1, 0)
     edge_index = adjacency_matrix.nonzero().t().contiguous()

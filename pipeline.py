@@ -3,62 +3,25 @@ import os
 import shutil
 import subprocess
 from collections import defaultdict
-from copy import deepcopy
 from typing import Callable, Optional
 
 import dask
 import numpy as np
 import pandas as pd
-import torch
 from Bio.PDB import PDBIO, PDBParser
 from dask.diagnostics import ProgressBar
+from posebusters.posebusters import PoseBusters
 from rdkit import Chem
-from rdkit.Geometry import Point3D
 from spyrmsd import molecule
 from spyrmsd.rmsd import symmrmsd
-from torch_geometric.data import HeteroData
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 
 from dataloader.pdbbind_dataset import PDBBindDataset
 from dataloader.protein_ligand_complex import ProteinLigandComplex
+from io_utils import load_saved_model, read_ligand
 
 P2RANK_EXECUTABLE = "/home/dit905/dit/p2rank_24/prank"
-
-
-def _load_saved_model(model_path: str, model_class: type, model_parameters: dict) -> torch.nn.Module:
-    """
-    Loads a pretrained model from weights saved to disk.
-
-    :param model_path: Path to the model file containing the weights in a state_dict.
-    :param model_class: Python class of the model.
-    :param model_parameters: Additional parameters to be passed to the model constructor.
-    :return: torch module ready to be used.
-    """
-    logging.info(f"Loading saved model of class {model_class} from {model_path}...")
-    model = model_class(**model_parameters)
-    logging.debug(f"Loading model of class {model_class} with parameters {model_parameters}.")
-    model.load_state_dict(torch.load(model_path))
-    model.eval()
-    logging.info("Loaded saved model.")
-    return model
-
-
-def _graph_to_sdf(graph: HeteroData, output_path: str):
-    """
-    Saves a PyTorch Geometric molecular graph to a .sdf file using RDKit.
-
-    :param graph: PyG HeteroData object containing an RDKit Molecule object with molecular information
-    and ligand coordinates.
-    :param output_path: where to save the .sdf file.
-    """
-    rdkit_ligand = deepcopy(graph["rdkit_ligand"])
-    ligand_coordinates = graph['ligand'].pos.cpu().numpy()
-    conformer = rdkit_ligand.GetConformer()
-    for i in range(rdkit_ligand.GetNumAtoms()):
-        conformer.SetAtomPosition(i, Point3D(*ligand_coordinates[i]))
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    Chem.SDWriter(output_path).write(rdkit_ligand, confId=0)
 
 
 class TwoStepBlindDocking:
@@ -91,14 +54,14 @@ class TwoStepBlindDocking:
 
         self.pocket_scoring_module = pocket_scoring_module
         if pocket_scoring_module is None and pocket_scoring_path is not None and pocket_scoring_model_class is not None:
-            self.pocket_scoring_module = _load_saved_model(pocket_scoring_path, pocket_scoring_model_class,
-                                                           pocket_scoring_model_params)
+            self.pocket_scoring_module = load_saved_model(pocket_scoring_path, pocket_scoring_model_class,
+                                                          pocket_scoring_model_params)
         self.scoring_batch_size = scoring_batch_size
 
         self.pocket_docking_module = pocket_docking_module
         if pocket_docking_module is None and pocket_docking_path is not None and pocket_docking_model_class is not None:
-            self.pocket_docking_module = _load_saved_model(pocket_docking_path, pocket_docking_model_class,
-                                                           pocket_docking_model_params)
+            self.pocket_docking_module = load_saved_model(pocket_docking_path, pocket_docking_model_class,
+                                                          pocket_docking_model_params)
         self.docking_batch_size = docking_batch_size
 
         self.docking_predictions_path = docking_predictions_path
@@ -315,8 +278,7 @@ class TwoStepBlindDocking:
                                                         ligand_reference_path=pl_complex.ligand_reference_path))
         return top_pockets
 
-    def dock_to_pocket(self, pl_complexes: list[ProteinLigandComplex], predicted_ligands_path: str = None,
-                       save_results: bool = True):
+    def dock_to_pocket(self, pl_complexes: list[ProteinLigandComplex], predicted_ligands_path: str = None):
         """
         Perform molecular docking using a pretrained model.
 
@@ -335,13 +297,6 @@ class TwoStepBlindDocking:
         predictions = []
         for batch in tqdm(loader):
             predictions.extend(self.pocket_docking_module(batch))
-
-        if save_results:
-            logging.info(f"Prediction module finished successfully. Saving predictions to {predicted_ligands_path}...")
-            for pl_complex, prediction in filter(lambda x: x[1] is not None, zip(pl_complexes, predictions)):
-                _graph_to_sdf(prediction,
-                              os.path.join(predicted_ligands_path, pl_complex.name,
-                                           f"{os.path.basename(pl_complex.protein_path)[:-4]}_ligand_prediction.sdf"))
         return predictions
 
     def predict(self, pl_complexes: list[ProteinLigandComplex], return_pockets: bool = False):
@@ -363,48 +318,60 @@ class TwoStepBlindDocking:
             return predictions, segmented_ranked_pockets
         return predictions
 
+    def _evaluate_rmsd(self, pl_complex: ProteinLigandComplex):
+        prediction_molecule_file = os.path.join(
+            self.docking_predictions_path, pl_complex.name,
+            f"{os.path.basename(pl_complex.protein_path)[:-4]}_ligand_prediction.sdf"
+        )
+        try:
+            supplier = Chem.SDMolSupplier(prediction_molecule_file)
+            predicted_molecule = supplier.__getitem__(0)
+        except OSError:
+            predicted_molecule = None
+
+        if predicted_molecule is not None:
+
+            predicted_molecule = molecule.Molecule.from_rdkit(predicted_molecule)
+
+            true_ligand_path = pl_complex.ligand_reference_path if pl_complex.ligand_reference_path is not None else pl_complex.ligand_path
+            true_molecule = molecule.Molecule.from_rdkit(read_ligand(true_ligand_path, include_hydrogen=False))
+
+            rmsd = symmrmsd(
+                predicted_molecule.coordinates,
+                true_molecule.coordinates,
+                predicted_molecule.atomicnums,
+                true_molecule.atomicnums,
+                predicted_molecule.adjacency_matrix,
+                true_molecule.adjacency_matrix,
+            )
+
+            return rmsd
+        else:
+            logging.error(f"Ligand for PDB {pl_complex.name} was not readable. Skipping it in the evaluation.")
+
+    def _evaluate_validity(self, pl_complexes: list[ProteinLigandComplex]):
+
+        table = []
+        for pl_complex in pl_complexes:
+            table.append({
+                "mol_pred": os.path.join(self.docking_predictions_path,pl_complex.name,
+                        f"{os.path.basename(pl_complex.protein_path)[:-4]}_ligand_prediction.sdf"),
+                "mol_true": pl_complex.ligand_reference_path if pl_complex.ligand_reference_path is not None else pl_complex.ligand_path,
+                "mol_cond": pl_complex.protein_path,
+            })
+
+        table = pd.DataFrame(table)
+        evaluator = PoseBusters()
+        out = evaluator.bust_table(table)
+        valid_molecules = (out.sum(axis=1) == 25)
+        return valid_molecules.sum() / len(valid_molecules)
+
     def evaluate(self, pl_complexes: list[ProteinLigandComplex]) -> dict:
         shutil.rmtree(self.docking_predictions_path)
         predictions, pockets = self.predict(pl_complexes, return_pockets=True)
         rmsd_dict = defaultdict(lambda: [])
         for pl_complex in pockets:
-            prediction_molecule_file = os.path.join(
-                self.docking_predictions_path, pl_complex.name,
-                f"{os.path.basename(pl_complex.protein_path)[:-4]}_ligand_prediction.sdf"
-            )
-            try:
-                supplier = Chem.SDMolSupplier(prediction_molecule_file)
-                predicted_molecule = supplier.__getitem__(0)
-            except OSError:
-                predicted_molecule = None
-
-            if predicted_molecule is not None:
-
-                predicted_molecule = molecule.Molecule.from_rdkit(predicted_molecule)
-
-                true_ligand_path = pl_complex.ligand_reference_path if pl_complex.ligand_reference_path is not None else pl_complex.ligand_path
-                if pl_complex.ligand_path.endswith(".sdf"):
-                    supplier = Chem.SDMolSupplier(true_ligand_path)
-                    true_molecule = molecule.Molecule.from_rdkit(supplier.__getitem__(0))
-                elif pl_complex.ligand_path.endswith(".mol2"):
-                    true_molecule = molecule.Molecule.from_rdkit(Chem.MolFromMol2File(true_ligand_path))
-                else:
-                    raise ValueError(f"Input ligand file must be either .sdf or .mol2 file. Got {pl_complex.ligand_path}")
-
-                print(f"{true_molecule=}, {true_molecule.coordinates.shape}")
-                print(f"{predicted_molecule=}, {predicted_molecule.coordinates.shape=}")
-                rmsd = symmrmsd(
-                    predicted_molecule.coordinates,
-                    true_molecule.coordinates,
-                    predicted_molecule.atomicnums,
-                    true_molecule.atomicnums,
-                    predicted_molecule.adjacency_matrix,
-                    true_molecule.adjacency_matrix,
-                )
-
-                rmsd_dict[pl_complex.name].append(rmsd)
-            else:
-                logging.error(f"Ligand for PDB {pl_complex.name} was not readable. Skipping it in the evaluation.")
+            rmsd_dict[pl_complex.name].append(self._evaluate_rmsd(pl_complex))
 
         top_k_rmsd_list = [sorted(lst)[0] for lst in rmsd_dict.values()]
 
@@ -412,6 +379,7 @@ class TwoStepBlindDocking:
             "rmsd_under_1A": len(list(filter(lambda x: x <= 1, top_k_rmsd_list))) / len(top_k_rmsd_list),
             "rmsd_under_2A": len(list(filter(lambda x: x <= 2, top_k_rmsd_list))) / len(top_k_rmsd_list),
             "rmsd_under_5A": len(list(filter(lambda x: x <= 5, top_k_rmsd_list))) / len(top_k_rmsd_list),
+            "valid_and_under_2A": self._evaluate_validity(pockets)
         }
 
         return results

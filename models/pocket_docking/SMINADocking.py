@@ -3,34 +3,36 @@ import shutil
 import subprocess
 from typing import Optional
 
-from rdkit.Chem import SDMolSupplier
+from rdkit import Chem
 from torch_geometric.data import Batch, HeteroData
 
 from dataloader.ligand_graph_construction import build_ligand_graph
-from pipeline import _graph_to_sdf
+from io_utils import graph_to_sdf, read_ligand, write_ligand
 
 SMINA_PATH = "./smina"
 
 
 class SMINADocking:
-    def __init__(self, smina_path: str = SMINA_PATH, tempdir: str = ".tmp_smina",
+    def __init__(self, smina_path: str = SMINA_PATH,
                  data_path: str = "../../data/PDBBind_processed",
+                 tempdir: str = ".tmp_smina",
+                 output_dir: str = None,
                  use_whole_protein: bool = True,
                  box_size: float = 20, exhaustiveness: float = 16):
         self.smina_path = smina_path
-        self.tempdir = tempdir
         self.data_path = data_path
+        self.tempdir = tempdir
+        self.output_dir = output_dir if output_dir is not None else tempdir
         self.use_whole_protein = use_whole_protein
         self.box_size = box_size
         self.exhaustiveness = exhaustiveness
 
     def run_smina(self, item: HeteroData) -> Optional[HeteroData]:
         input_ligand_path = os.path.join(self.tempdir, "ligand.sdf")
-        item["ligand"].pos -= item["ligand_centroid"]
-        #item["ligand"].pos += item["pocket_centroid"]
-        _graph_to_sdf(item, input_ligand_path)
+        graph_to_sdf(item, input_ligand_path)
 
-        output_path = os.path.join(self.tempdir, "output.sdf")
+        temp_output_path = os.path.join(self.tempdir,
+                                          f"{os.path.basename(item['protein_path'])[:-4]}_ligand_prediction.sdf")
         x, y, z = item["pocket_centroid"]
         pdb = item["name"]
         protein_path = os.path.join(self.data_path, pdb, f'{pdb}_protein.pdb') if self.use_whole_protein else item["protein_path"]
@@ -38,12 +40,18 @@ class SMINADocking:
                    f"--center_x={x} --center_y={y} --center_z={z} "
                    f"--size_x={self.box_size} --size_y={self.box_size} --size_z={self.box_size} "
                    f"--exhaustiveness {self.exhaustiveness} "
-                   f"-o {output_path} -q").split()
-        subprocess.run(command)#, stdout=subprocess.DEVNULL)
+                   f"-o {temp_output_path} -q --num_modes 40").split()
+        subprocess.run(command, stdout=subprocess.DEVNULL)
 
-        if os.path.exists(output_path):
-            supplier = SDMolSupplier(output_path)
-            ligand = supplier.__getitem__(0)
+        os.makedirs(os.path.join(self.output_dir, item["name"]), exist_ok=True)
+
+        output_ligand_path = os.path.join(self.output_dir, item["name"],
+                                   f"{os.path.basename(item['protein_path'])[:-4]}_ligand_prediction.sdf")
+        if os.path.exists(temp_output_path):
+            ligand = read_ligand(temp_output_path)
+            ligand = Chem.RemoveHs(ligand)
+            write_ligand(output_ligand_path, ligand)
+
             if ligand is not None:
                 item["rdkit_ligand"] = ligand
                 item = build_ligand_graph(item, ligand)

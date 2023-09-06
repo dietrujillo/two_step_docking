@@ -46,7 +46,10 @@ if __name__ == '__main__':
     pipeline = TwoStepBlindDocking(
         p2rank_executable_path=namespace.p2rank_path,
         pocket_scoring_module=DebugScoring(mode="distance"),
-        pocket_docking_module=SMINADocking(smina_path=namespace.smina_path, box_size=20, data_path=namespace.data_path, use_whole_protein=False),
+        pocket_docking_module=SMINADocking(smina_path=namespace.smina_path, box_size=20,
+                                           data_path=namespace.data_path,
+                                           output_dir="docking_predictions",
+                                           use_whole_protein=False),
         top_k=namespace.top_k,
         scoring_batch_size=namespace.scoring_batch_size,
         docking_batch_size=namespace.docking_batch_size,
@@ -55,10 +58,10 @@ if __name__ == '__main__':
 
     logging.info(pipeline)
     pdbs = []
-    for pdb in tqdm(os.listdir(namespace.data_path)):
+    for pdb in tqdm(os.listdir(namespace.data_path)[:10]):
         pdbs.append(ProteinLigandComplex(name=pdb,
                                          protein_path=os.path.join(namespace.data_path, pdb, f"{pdb}_protein.pdb"),
-                                         ligand_path=os.path.join(namespace.data_path, pdb, f"{pdb}_ligand.sdf"),
+                                         ligand_path=os.path.join(namespace.data_path, pdb, f"{pdb}_ligand_start_conf.sdf"),
                                          ligand_reference_path=os.path.join(namespace.data_path, pdb, f"{pdb}_ligand.sdf")))
 
     print(pipeline.evaluate(pdbs))
