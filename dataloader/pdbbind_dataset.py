@@ -49,6 +49,14 @@ class PDBBindDataset(Dataset):
         return len(self.data)
 
     def get_pocket_prediction(self, pl_complex: ProteinLigandComplex) -> tuple[int, Optional[pd.Series]]:
+        """
+        Get p2rank pocket prediction data from a protein-ligand complex. The name of the complex is
+         expected to be either an unranked segmented pocket in the format {complex_id}_{pocket_number}.pdb, or a ranked
+         pocket in the format {complex_id}_{pocket_number}_{pocket_rank}.pdb.
+        :param pl_complex: ProteinLigandComplex containing complex information.
+        :return: tuple with the pocket number from the p2rank prediction,
+         as well as the full pandas Series with the pocket prediction.
+        """
         pocket_num = int(os.path.basename(pl_complex.protein_path).split("_")[1].split(".")[0].split("_")[0])
         p2rank_predictions = pd.read_csv(
             os.path.join(self.pocket_predictions_dir,

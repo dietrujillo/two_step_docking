@@ -19,7 +19,7 @@ class DebugScoring:
         if self.mode not in {"distance", "p2rank"}:
             raise ValueError(f"The parameter \"mode\" must be one of {{\"distance\", \"p2rank\"}}. Got {mode}.")
 
-    def call_distance(self, batch: Batch):
+    def call_distance(self, batch: Batch) -> list[float]:
         """
         Compute a score based on the distance from the true ligand position to the center of the pocket.
         In order to do this, the true position of the ligand must be known; and as such,
@@ -37,10 +37,10 @@ class DebugScoring:
             ligand_center = ComputeCentroid(reference_ligand.GetConformer())
             ligand_center = torch.Tensor([ligand_center.x, ligand_center.y, ligand_center.z])
             distance = torch.norm(ligand_center - item["pocket_centroid"])
-            results.append(distance)
+            results.append(distance.item())
         return results
 
-    def call_p2rank(self, batch: Batch):
+    def call_p2rank(self, batch: Batch) -> list[float]:
         """
         Rank pockets based on their p2rank score.
         This means we skip any ligand-dependent ranking and keep the p2rank predictions.
@@ -52,7 +52,7 @@ class DebugScoring:
             results.append(int(os.path.basename(protein_path).split("_")[1][:-4]))
         return results
 
-    def __call__(self, batch: Batch):
+    def __call__(self, batch: Batch) -> list[float]:
         """
         Score a batch of pocket-ligand pairs according to how well they bind together.
         Lower score means higher likelihood.

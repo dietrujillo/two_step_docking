@@ -145,7 +145,7 @@ class TwoStepBlindDocking:
         pockets_saved_path = pockets_saved_path if pockets_saved_path is not None else self.pockets_saved_path
 
         segmentations = []
-        for protein_id, protein_path in zip(protein_ids, protein_paths, strict=True):
+        for protein_id, protein_path in zip(protein_ids, protein_paths):
             p2rank_predictions = pd.read_csv(
                 os.path.join(p2rank_output_folder, f"{os.path.basename(protein_path)}_predictions.csv"))
             pdb_pockets_dir = os.path.join(pockets_saved_path, protein_id)
@@ -155,9 +155,12 @@ class TwoStepBlindDocking:
                 shutil.copyfile(protein_path, os.path.join(pdb_pockets_dir, f"{protein_id}_0.pdb"))
             else:
                 for pocket_id, pocket in p2rank_predictions.iterrows():
-                    segmentations.append(self._segment_protein_pocket(protein_id, protein_path, pocket,
-                                                                      os.path.join(pdb_pockets_dir,
-                                                                                   f"{protein_id}_{pocket_id}.pdb")))
+                    segmentations.append(
+                        self._segment_protein_pocket(
+                            protein_id, protein_path, pocket,
+                            os.path.join(pdb_pockets_dir, f"{protein_id}_{pocket_id}.pdb")
+                        )
+                    )
 
         with ProgressBar():
             dask.compute(segmentations)
@@ -371,7 +374,9 @@ class TwoStepBlindDocking:
         predictions, pockets = self.predict(pl_complexes, return_pockets=True)
         rmsd_dict = defaultdict(lambda: [])
         for pl_complex in pockets:
-            rmsd_dict[pl_complex.name].append(self._evaluate_rmsd(pl_complex))
+            rmsd = self._evaluate_rmsd(pl_complex)
+            if rmsd is not None:
+                rmsd_dict[pl_complex.name].append(rmsd)
 
         top_k_rmsd_list = [sorted(lst)[0] for lst in rmsd_dict.values()]
 

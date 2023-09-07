@@ -40,7 +40,7 @@ class SMINADocking:
                    f"--center_x={x} --center_y={y} --center_z={z} "
                    f"--size_x={self.box_size} --size_y={self.box_size} --size_z={self.box_size} "
                    f"--exhaustiveness {self.exhaustiveness} "
-                   f"-o {temp_output_path} -q --num_modes 40").split()
+                   f"-o {temp_output_path} -q --num_modes=40").split()
         subprocess.run(command, stdout=subprocess.DEVNULL)
 
         os.makedirs(os.path.join(self.output_dir, item["name"]), exist_ok=True)
