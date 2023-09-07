@@ -356,12 +356,16 @@ class TwoStepBlindDocking:
 
         table = []
         for pl_complex in pl_complexes:
-            table.append({
-                "mol_pred": os.path.join(self.docking_predictions_path,pl_complex.name,
-                        f"{os.path.basename(pl_complex.protein_path)[:-4]}_ligand_prediction.sdf"),
-                "mol_true": pl_complex.ligand_reference_path if pl_complex.ligand_reference_path is not None else pl_complex.ligand_path,
-                "mol_cond": pl_complex.protein_path,
-            })
+            predicted_molecule_path = os.path.join(
+                self.docking_predictions_path, pl_complex.name,
+                f"{os.path.basename(pl_complex.protein_path)[:-4]}_ligand_prediction.sdf"
+            )
+            if os.path.exists(predicted_molecule_path):
+                table.append({
+                    "mol_pred": predicted_molecule_path,
+                    "mol_true": pl_complex.ligand_reference_path if pl_complex.ligand_reference_path is not None else pl_complex.ligand_path,
+                    "mol_cond": pl_complex.protein_path,
+                })
 
         table = pd.DataFrame(table)
         evaluator = PoseBusters()
