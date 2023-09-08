@@ -67,6 +67,8 @@ class TwoStepBlindDocking:
         self.docking_predictions_path = docking_predictions_path
         os.makedirs(docking_predictions_path, exist_ok=True)
 
+        self.evaluator = PoseBusters()
+
     def _run_p2rank(self, proteins: list[str], p2rank_input_filename: str, p2rank_output_folder: str):
         """
         Generates a file in the format expected by p2rank and then runs the p2rank algorithm from the shell.
@@ -316,7 +318,7 @@ class TwoStepBlindDocking:
         assert self.pocket_docking_module is not None, "Pocket docking module not found. Prediction is not possible."
 
         segmented_ranked_pockets = self.get_pockets(pl_complexes)
-        predictions = self.dock_to_pocket(segmented_ranked_pockets)
+        predictions = None#self.dock_to_pocket(segmented_ranked_pockets)
         if return_pockets:
             return predictions, segmented_ranked_pockets
         return predictions
@@ -352,43 +354,34 @@ class TwoStepBlindDocking:
         else:
             logging.error(f"Ligand for PDB {pl_complex.name} was not readable. Skipping it in the evaluation.")
 
-    def _evaluate_validity(self, pl_complexes: list[ProteinLigandComplex]):
-
-        table = []
-        for pl_complex in pl_complexes:
-            predicted_molecule_path = os.path.join(
-                self.docking_predictions_path, pl_complex.name,
-                f"{os.path.basename(pl_complex.protein_path)[:-4]}_ligand_prediction.sdf"
-            )
-            if os.path.exists(predicted_molecule_path):
-                table.append({
-                    "mol_pred": predicted_molecule_path,
-                    "mol_true": pl_complex.ligand_reference_path if pl_complex.ligand_reference_path is not None else pl_complex.ligand_path,
-                    "mol_cond": pl_complex.protein_path,
-                })
-
-        table = pd.DataFrame(table)
-        evaluator = PoseBusters()
-        out = evaluator.bust_table(table)
-        valid_molecules = (out.sum(axis=1) == 25)
-        return valid_molecules.sum() / len(valid_molecules)
+    def _evaluate_validity(self, pl_complex: ProteinLigandComplex):
+        predicted_molecule_path = os.path.join(
+            self.docking_predictions_path, pl_complex.name,
+            f"{os.path.basename(pl_complex.protein_path)[:-4]}_ligand_prediction.sdf"
+        )
+        true_molecule_path = pl_complex.ligand_reference_path if pl_complex.ligand_reference_path is not None else pl_complex.ligand_path
+        out = self.evaluator.bust([predicted_molecule_path], true_molecule_path, pl_complex.protein_path)
+        return out.sum(axis=1)[0]
 
     def evaluate(self, pl_complexes: list[ProteinLigandComplex]) -> dict:
-        shutil.rmtree(self.docking_predictions_path)
+        #shutil.rmtree(self.docking_predictions_path)
         predictions, pockets = self.predict(pl_complexes, return_pockets=True)
         rmsd_dict = defaultdict(lambda: [])
+        validity_dict = defaultdict(lambda: [])
         for pl_complex in pockets:
             rmsd = self._evaluate_rmsd(pl_complex)
             if rmsd is not None:
                 rmsd_dict[pl_complex.name].append(rmsd)
+                validity_dict[pl_complex.name].append(self._evaluate_validity(pl_complex))
 
         top_k_rmsd_list = [sorted(lst)[0] for lst in rmsd_dict.values()]
+        top_k_validity_list = [sorted(lst, reverse=True)[0] for lst in validity_dict.values()]
 
         results = {
             "rmsd_under_1A": len(list(filter(lambda x: x <= 1, top_k_rmsd_list))) / len(top_k_rmsd_list),
             "rmsd_under_2A": len(list(filter(lambda x: x <= 2, top_k_rmsd_list))) / len(top_k_rmsd_list),
             "rmsd_under_5A": len(list(filter(lambda x: x <= 5, top_k_rmsd_list))) / len(top_k_rmsd_list),
-            "valid_and_under_2A": self._evaluate_validity(pockets)
+            "valid_and_under_2A": len(list(filter(lambda x: x == 25, top_k_validity_list))) / len(top_k_validity_list)
         }
 
         return results
