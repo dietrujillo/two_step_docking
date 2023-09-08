@@ -66,3 +66,6 @@ class SMINADocking:
             batch[i] = self.run_smina(item)
         shutil.rmtree(self.tempdir)
         return batch
+
+    def __repr__(self):
+        return f"SMINADocking(**{str(self.__dict__)})"

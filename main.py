@@ -6,7 +6,7 @@ from tqdm import tqdm
 
 from dataloader.protein_ligand_complex import ProteinLigandComplex
 from models.pocket_docking.SMINADocking import SMINADocking
-from models.pocket_scoring.DebugScoring import DebugScoring
+from models.pocket_scoring.NaiveScoring import NaiveScoring
 from pipeline import TwoStepBlindDocking
 
 
@@ -45,7 +45,7 @@ if __name__ == '__main__':
 
     pipeline = TwoStepBlindDocking(
         p2rank_executable_path=namespace.p2rank_path,
-        pocket_scoring_module=DebugScoring(mode="distance"),
+        pocket_scoring_module=NaiveScoring(),
         pocket_docking_module=SMINADocking(smina_path=namespace.smina_path, box_size=20,
                                            data_path=namespace.data_path,
                                            output_dir="docking_predictions",
@@ -65,3 +65,4 @@ if __name__ == '__main__':
                                          ligand_reference_path=os.path.join(namespace.data_path, pdb, f"{pdb}_ligand.sdf")))
 
     print(pipeline.evaluate(pdbs))
+    logging.info("Finished evaluation.")

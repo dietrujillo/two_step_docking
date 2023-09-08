@@ -26,7 +26,7 @@ P2RANK_EXECUTABLE = "/home/dit905/dit/p2rank_24/prank"
 
 class TwoStepBlindDocking:
 
-    def __init__(self, top_k: int = 5, segmentation_distance_threshold: float = 20.0,
+    def __init__(self, top_k: int = 1, segmentation_distance_threshold: float = 20.0,
                  p2rank_executable_path: str = P2RANK_EXECUTABLE, p2rank_cache_path: str = ".p2rank_cache",
                  pockets_saved_path: str = ".generated_pockets",
                  ranked_pockets_path: str = ".ranked_pockets",
@@ -68,6 +68,9 @@ class TwoStepBlindDocking:
         os.makedirs(docking_predictions_path, exist_ok=True)
 
         self.evaluator = PoseBusters()
+
+    def __repr__(self):
+        return f"TwoStepBlindDocking(**{str(self.__dict__)})"
 
     def _run_p2rank(self, proteins: list[str], p2rank_input_filename: str, p2rank_output_folder: str):
         """
@@ -318,7 +321,7 @@ class TwoStepBlindDocking:
         assert self.pocket_docking_module is not None, "Pocket docking module not found. Prediction is not possible."
 
         segmented_ranked_pockets = self.get_pockets(pl_complexes)
-        predictions = None#self.dock_to_pocket(segmented_ranked_pockets)
+        predictions = self.dock_to_pocket(segmented_ranked_pockets)
         if return_pockets:
             return predictions, segmented_ranked_pockets
         return predictions
@@ -364,11 +367,14 @@ class TwoStepBlindDocking:
         return out.sum(axis=1)[0]
 
     def evaluate(self, pl_complexes: list[ProteinLigandComplex]) -> dict:
-        #shutil.rmtree(self.docking_predictions_path)
+        logging.debug("Deleting previous prediction folder.")
+        shutil.rmtree(self.docking_predictions_path)
         predictions, pockets = self.predict(pl_complexes, return_pockets=True)
+
+        logging.info("Running evaluations...")
         rmsd_dict = defaultdict(lambda: [])
         validity_dict = defaultdict(lambda: [])
-        for pl_complex in pockets:
+        for pl_complex in tqdm(pockets):
             rmsd = self._evaluate_rmsd(pl_complex)
             if rmsd is not None:
                 rmsd_dict[pl_complex.name].append(rmsd)
