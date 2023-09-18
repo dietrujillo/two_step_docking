@@ -4,7 +4,7 @@ from copy import deepcopy
 
 import torch
 from rdkit import Chem
-from rdkit.Chem import SDMolSupplier, MolFromMol2File, AddHs
+from rdkit.Chem import SDMolSupplier, MolFromMol2File, MolFromPDBFile, AddHs
 from rdkit.Geometry import Point3D
 from torch_geometric.data import HeteroData
 
@@ -15,8 +15,10 @@ def read_ligand(ligand_path: str, include_hydrogen: bool = True):
         ligand = supplier.__getitem__(0)
     elif ligand_path.endswith(".mol2"):
         ligand = MolFromMol2File(ligand_path)
+    elif ligand_path.endswith(".pdb"):
+        ligand = MolFromPDBFile(ligand_path)
     else:
-        raise ValueError(f"Input ligand file must be either .sdf or .mol2 file. Got {ligand_path}")
+        raise ValueError(f"Input ligand file must be one of {{.sdf, .mol2, .pdb}} file. Got {ligand_path}")
     if include_hydrogen:
         ligand = AddHs(ligand)
     return ligand

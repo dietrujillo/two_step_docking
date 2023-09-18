@@ -27,6 +27,7 @@ def parse_arguments() -> argparse.Namespace:
     # pocket docking arguments
     argument_parser.add_argument("--top_k", default=1, help="How many of the top ranked pockets to dock to", type=int)
     argument_parser.add_argument("--smina_path", default="/home/diego/Universidad/Harvard/Lab/methods/smina.static", help="Path to the SMINA executable", type=str)
+    argument_parser.add_argument("--adfr_path", default="/home/diego/Universidad/Harvard/Lab/methods/ADFRsuite-1.0/bin/", help="Path to the ADFR Suite binaries", type=str)
     argument_parser.add_argument("--docking_batch_size", default=1, help="Batch size for the docking model.", type=int)
 
     return argument_parser.parse_args()
@@ -49,6 +50,7 @@ if __name__ == '__main__':
         pocket_docking_module=SMINADocking(smina_path=namespace.smina_path, box_size=20,
                                            data_path=namespace.data_path,
                                            output_dir="docking_predictions",
+                                           adfr_path=namespace.adfr_path,
                                            use_whole_protein=False),
         top_k=namespace.top_k,
         scoring_batch_size=namespace.scoring_batch_size,
