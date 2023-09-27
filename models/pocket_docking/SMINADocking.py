@@ -68,11 +68,14 @@ class SMINADocking:
         subprocess.run(command, stdout=subprocess.DEVNULL)
 
         os.makedirs(os.path.join(self.output_dir, item["name"]), exist_ok=True)
-        output_ligand_path = os.path.join(self.output_dir, item["name"],
-                                          f"{os.path.basename(item['protein_path'])[:-4]}_ligand_prediction.sdf")
+
         if os.path.exists(temp_output_path):
             ligand = read_ligand(temp_output_path)
             ligand = Chem.RemoveHs(ligand)
+
+            output_ligand_path = os.path.join(self.output_dir, item["name"],
+                                              f"{os.path.basename(item['protein_path'])[:-4]}_ligand_prediction_score{ligand.GetProp('minimizedAffinity')}.sdf")
+
             write_ligand(output_ligand_path, ligand)
 
             if ligand is not None:

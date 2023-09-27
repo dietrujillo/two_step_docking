@@ -2,6 +2,7 @@ import logging
 import os
 import shutil
 import subprocess
+import time
 from collections import defaultdict
 from typing import Callable, Optional
 
@@ -157,6 +158,7 @@ class TwoStepBlindDocking:
             os.makedirs(pdb_pockets_dir, exist_ok=True)
 
             if len(p2rank_predictions) == 0:
+                logging.warning(f"p2rank failed to find pockets for {protein_id}. Using center of protein.")
                 shutil.copyfile(protein_path, os.path.join(pdb_pockets_dir, f"{protein_id}_0.pdb"))
             else:
                 for pocket_id, pocket in p2rank_predictions.iterrows():
@@ -286,7 +288,7 @@ class TwoStepBlindDocking:
                                                         ligand_reference_path=pl_complex.ligand_reference_path))
         return top_pockets
 
-    def dock_to_pocket(self, pl_complexes: list[ProteinLigandComplex], predicted_ligands_path: str = None):
+    def dock_to_pocket(self, pl_complexes: list[ProteinLigandComplex]):
         """
         Perform molecular docking using a pretrained model.
 
@@ -294,10 +296,7 @@ class TwoStepBlindDocking:
             the ligand .sdf or .mol2.
         :param predicted_ligands_path: path to saved predicted ligand positions. If None,
             defaults to self.docking_predictions_path.
-        :param save_results: whether to save the predictions to .sdf files or simply return them.
         """
-        if predicted_ligands_path is None:
-            predicted_ligands_path = self.docking_predictions_path
 
         logging.info("Running prediction module...")
         loader = DataLoader(PDBBindDataset(pl_complexes, include_absolute_coordinates=False, use_ligand_centroid=True),
@@ -320,19 +319,21 @@ class TwoStepBlindDocking:
         assert self.pocket_scoring_module is not None, "Pocket scoring module not found. Prediction is not possible."
         assert self.pocket_docking_module is not None, "Pocket docking module not found. Prediction is not possible."
 
+        start_time = time.process_time()
         segmented_ranked_pockets = self.get_pockets(pl_complexes)
         predictions = self.dock_to_pocket(segmented_ranked_pockets)
+        elapsed_time = time.process_time() - start_time
+
+        pockets_per_complex = len(segmented_ranked_pockets) / len(pl_complexes)
+        logging.info(f"Inference took {elapsed_time / pockets_per_complex} seconds per protein-ligand complex.")
+
         if return_pockets:
             return predictions, segmented_ranked_pockets
         return predictions
 
-    def _evaluate_rmsd(self, pl_complex: ProteinLigandComplex):
-        prediction_molecule_file = os.path.join(
-            self.docking_predictions_path, pl_complex.name,
-            f"{os.path.basename(pl_complex.protein_path)[:-4]}_ligand_prediction.sdf"
-        )
+    def _evaluate_rmsd(self, pl_complex: ProteinLigandComplex, predicted_molecule_path: str):
         try:
-            supplier = Chem.SDMolSupplier(prediction_molecule_file)
+            supplier = Chem.SDMolSupplier(predicted_molecule_path)
             predicted_molecule = supplier.__getitem__(0)
         except OSError:
             predicted_molecule = None
@@ -357,11 +358,7 @@ class TwoStepBlindDocking:
         else:
             logging.error(f"Ligand for PDB {pl_complex.name} was not readable. Skipping it in the evaluation.")
 
-    def _evaluate_validity(self, pl_complex: ProteinLigandComplex):
-        predicted_molecule_path = os.path.join(
-            self.docking_predictions_path, pl_complex.name,
-            f"{os.path.basename(pl_complex.protein_path)[:-4]}_ligand_prediction.sdf"
-        )
+    def _evaluate_validity(self, pl_complex: ProteinLigandComplex, predicted_molecule_path: str):
         true_molecule_path = pl_complex.ligand_reference_path if pl_complex.ligand_reference_path is not None else pl_complex.ligand_path
         out = self.evaluator.bust([predicted_molecule_path], true_molecule_path, pl_complex.protein_path)
         return out.sum(axis=1)[0]
@@ -374,20 +371,28 @@ class TwoStepBlindDocking:
         logging.info("Running evaluations...")
         rmsd_dict = defaultdict(lambda: [])
         validity_dict = defaultdict(lambda: [])
-        for pl_complex in tqdm(pockets):
-            rmsd = self._evaluate_rmsd(pl_complex)
-            if rmsd is not None:
-                rmsd_dict[pl_complex.name].append(rmsd)
-                validity_dict[pl_complex.name].append(self._evaluate_validity(pl_complex))
 
-        top_k_rmsd_list = [sorted(lst)[0] for lst in rmsd_dict.values()]
-        top_k_validity_list = [sorted(lst, reverse=True)[0] for lst in validity_dict.values()]
+        for pl_complex in pl_complexes:
+            pl_complex_predictions_path = os.path.join(self.docking_predictions_path, pl_complex.name)
+            sorted_ligands = sorted(filter(lambda x: x.endswith(".sdf"), os.listdir(pl_complex_predictions_path)),
+                                    key=lambda x: float(x.split("score")[1].split(".sdf")[0]))
+            shutil.copyfile(os.path.join(pl_complex_predictions_path, sorted_ligands[0]),
+                            os.path.join(pl_complex_predictions_path, f"{pl_complex.name}_ligand_prediction.sdf"))
+
+            rmsd = self._evaluate_rmsd(pl_complex, os.path.join(pl_complex_predictions_path,
+                                                                f"{pl_complex.name}_ligand_prediction.sdf"))
+            if rmsd is not None:
+                rmsd_dict[pl_complex.name] = rmsd
+                validity_dict[pl_complex.name] = self._evaluate_validity(
+                    pl_complex,
+                    os.path.join(pl_complex_predictions_path,f"{pl_complex.name}_ligand_prediction.sdf")
+                )
 
         results = {
-            "rmsd_under_1A": len(list(filter(lambda x: x <= 1, top_k_rmsd_list))) / len(top_k_rmsd_list),
-            "rmsd_under_2A": len(list(filter(lambda x: x <= 2, top_k_rmsd_list))) / len(top_k_rmsd_list),
-            "rmsd_under_5A": len(list(filter(lambda x: x <= 5, top_k_rmsd_list))) / len(top_k_rmsd_list),
-            "valid_and_under_2A": len(list(filter(lambda x: x == 25, top_k_validity_list))) / len(top_k_validity_list)
+            "rmsd_under_1A": len(list(filter(lambda x: x <= 1, rmsd_dict.values()))) / len(rmsd_dict),
+            "rmsd_under_2A": len(list(filter(lambda x: x <= 2, rmsd_dict.values()))) / len(rmsd_dict),
+            "rmsd_under_5A": len(list(filter(lambda x: x <= 5, rmsd_dict.values()))) / len(rmsd_dict),
+            "valid_and_under_2A": len(list(filter(lambda x: x == 25, validity_dict.values()))) / len(validity_dict)
         }
 
         return results
