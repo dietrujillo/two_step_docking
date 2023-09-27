@@ -54,15 +54,25 @@ class TwoStepBlindDocking:
         self.ignore_cache = ignore_cache
 
         self.pocket_scoring_module = pocket_scoring_module
-        if pocket_scoring_module is None and pocket_scoring_path is not None and pocket_scoring_model_class is not None:
-            self.pocket_scoring_module = load_saved_model(pocket_scoring_path, pocket_scoring_model_class,
-                                                          pocket_scoring_model_params)
+        if pocket_scoring_module is None:
+            if pocket_scoring_path is not None and pocket_scoring_model_class is not None:
+                self.pocket_scoring_module = load_saved_model(pocket_scoring_path, pocket_scoring_model_class,
+                                                              pocket_scoring_model_params)
+            else:
+                raise ValueError("No pocket scoring module specified. Please provide a model "
+                                 "to pocket_scoring_module or a model class and weights path "
+                                 "to pocket_scoring_model_class and pocket_scoring_model_params.")
         self.scoring_batch_size = scoring_batch_size
 
         self.pocket_docking_module = pocket_docking_module
-        if pocket_docking_module is None and pocket_docking_path is not None and pocket_docking_model_class is not None:
-            self.pocket_docking_module = load_saved_model(pocket_docking_path, pocket_docking_model_class,
-                                                          pocket_docking_model_params)
+        if pocket_docking_module is None:
+            if pocket_docking_path is not None and pocket_docking_model_class is not None:
+                self.pocket_docking_module = load_saved_model(pocket_docking_path, pocket_docking_model_class,
+                                                              pocket_docking_model_params)
+            else:
+                raise ValueError("No pocket docking module specified. Please provide a model "
+                                 "to pocket_docking_module or a model class and weights path "
+                                 "to pocket_docking_model_class and pocket_docking_model_params.")
         self.docking_batch_size = docking_batch_size
 
         self.docking_predictions_path = docking_predictions_path
@@ -325,7 +335,7 @@ class TwoStepBlindDocking:
         elapsed_time = time.process_time() - start_time
 
         pockets_per_complex = len(segmented_ranked_pockets) / len(pl_complexes)
-        logging.info(f"Inference took {elapsed_time / pockets_per_complex} seconds per protein-ligand complex.")
+        logging.info(f"Inference took {elapsed_time * pockets_per_complex / len(segmented_ranked_pockets)} seconds per protein-ligand complex.")
 
         if return_pockets:
             return predictions, segmented_ranked_pockets
@@ -369,24 +379,25 @@ class TwoStepBlindDocking:
         predictions, pockets = self.predict(pl_complexes, return_pockets=True)
 
         logging.info("Running evaluations...")
-        rmsd_dict = defaultdict(lambda: [])
-        validity_dict = defaultdict(lambda: [])
 
+        rmsd_dict = {}
+        validity_dict = {}
         for pl_complex in pl_complexes:
             pl_complex_predictions_path = os.path.join(self.docking_predictions_path, pl_complex.name)
             sorted_ligands = sorted(filter(lambda x: x.endswith(".sdf"), os.listdir(pl_complex_predictions_path)),
                                     key=lambda x: float(x.split("score")[1].split(".sdf")[0]))
-            shutil.copyfile(os.path.join(pl_complex_predictions_path, sorted_ligands[0]),
-                            os.path.join(pl_complex_predictions_path, f"{pl_complex.name}_ligand_prediction.sdf"))
+            if sorted_ligands:
+                shutil.copyfile(os.path.join(pl_complex_predictions_path, sorted_ligands[0]),
+                                os.path.join(pl_complex_predictions_path, f"{pl_complex.name}_ligand_prediction.sdf"))
 
-            rmsd = self._evaluate_rmsd(pl_complex, os.path.join(pl_complex_predictions_path,
-                                                                f"{pl_complex.name}_ligand_prediction.sdf"))
-            if rmsd is not None:
-                rmsd_dict[pl_complex.name] = rmsd
-                validity_dict[pl_complex.name] = self._evaluate_validity(
-                    pl_complex,
-                    os.path.join(pl_complex_predictions_path,f"{pl_complex.name}_ligand_prediction.sdf")
-                )
+                rmsd = self._evaluate_rmsd(pl_complex, os.path.join(pl_complex_predictions_path,
+                                                                    f"{pl_complex.name}_ligand_prediction.sdf"))
+                if rmsd is not None:
+                    rmsd_dict[pl_complex.name] = rmsd
+                    validity_dict[pl_complex.name] = self._evaluate_validity(
+                        pl_complex,
+                        os.path.join(pl_complex_predictions_path,f"{pl_complex.name}_ligand_prediction.sdf")
+                    )
 
         results = {
             "rmsd_under_1A": len(list(filter(lambda x: x <= 1, rmsd_dict.values()))) / len(rmsd_dict),
