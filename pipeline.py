@@ -384,9 +384,9 @@ class TwoStepBlindDocking:
         validity_dict = {}
         for pl_complex in pl_complexes:
             pl_complex_predictions_path = os.path.join(self.docking_predictions_path, pl_complex.name)
-            sorted_ligands = sorted(filter(lambda x: x.endswith(".sdf"), os.listdir(pl_complex_predictions_path)),
-                                    key=lambda x: float(x.split("score")[1].split(".sdf")[0]))
-            if sorted_ligands:
+            if os.listdir(pl_complex_predictions_path):
+                sorted_ligands = sorted(filter(lambda x: x.endswith(".sdf"), os.listdir(pl_complex_predictions_path)),
+                                        key=lambda x: float(x.split("score")[1].split(".sdf")[0]))
                 shutil.copyfile(os.path.join(pl_complex_predictions_path, sorted_ligands[0]),
                                 os.path.join(pl_complex_predictions_path, f"{pl_complex.name}_ligand_prediction.sdf"))
 
