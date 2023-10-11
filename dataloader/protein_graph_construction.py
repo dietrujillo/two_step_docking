@@ -95,7 +95,7 @@ def get_protein_features(protein: Structure) -> torch.Tensor:
         else:
             features.append(len(VALID_AMINO_ACIDS))
     features = torch.tensor(features)
-    return one_hot(features, num_classes=len(VALID_AMINO_ACIDS) + 1)
+    return features
 
 
 def get_protein_edges(coordinates: torch.Tensor, cutoff: float) -> tuple[torch.Tensor, None]:
@@ -113,7 +113,7 @@ def get_protein_edges(coordinates: torch.Tensor, cutoff: float) -> tuple[torch.T
     return edge_index, None
 
 
-def build_protein_graph(graph: HeteroData, protein: Structure, cutoff: float = 15) -> HeteroData:
+def build_protein_graph(graph: HeteroData, protein: Structure, cutoff: float = 10) -> HeteroData:
     """
     Obtain a graph from a BioPython protein Structure and add to a PyTorch HeteroData object as a graph.
     :param graph: HeteroData object to which the protein will be added.

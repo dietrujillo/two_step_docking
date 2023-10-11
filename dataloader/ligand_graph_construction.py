@@ -122,7 +122,7 @@ def get_ligand_features(ligand: Molecule) -> torch.Tensor:
         atom_features_list.append(
             [
                 _safe_index(
-                    VALID_FEATURES["possible_atomic_num_list"], atom.GetAtomicNum()
+                    VALID_FEATURES["possible_atomic_num_list"], str(atom.GetAtomicNum())
                 ),
                 VALID_FEATURES["possible_chirality_list"].index(
                     str(atom.GetChiralTag())

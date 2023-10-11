@@ -3,6 +3,7 @@ import os
 from typing import Union, Optional
 
 import pandas as pd
+import selfies
 import torch
 from Bio.PDB import PDBParser
 from rdkit.Chem import MolFromSmiles, AddHs, MolToSmiles
@@ -23,6 +24,7 @@ class PDBBindDataset(Dataset):
         include_absolute_coordinates: bool = True,
         include_hydrogen: bool = True,
         use_ligand_centroid: bool = False,
+        centroid_threshold: float = 10.0,
         pocket_predictions_dir: str = ".p2rank_cache/p2rank_output",
         **kwargs
     ):
@@ -39,6 +41,7 @@ class PDBBindDataset(Dataset):
         self.include_absolute_coordinates = include_absolute_coordinates
         self.include_hydrogen = include_hydrogen
         self.use_ligand_centroid = use_ligand_centroid
+        self.centroid_threshold = centroid_threshold
         self.pocket_predictions_dir = pocket_predictions_dir
 
     def len(self) -> int:
@@ -91,7 +94,7 @@ class PDBBindDataset(Dataset):
         if graph["ligand_smiles"] != {}:
             ligand = MolFromSmiles(graph["ligand_smiles"])
             if self.include_hydrogen:
-                ligand = AddHs(ligand)
+                ligand = AddHs(ligand, addCoords=True)
             EmbedMolecule(ligand)
             if self.include_absolute_coordinates:
                 logging.warning(
@@ -113,18 +116,24 @@ class PDBBindDataset(Dataset):
             del graph["ligand_smiles"]
             graph["ligand_smiles"] = MolToSmiles(ligand)
 
+        graph["ligand_selfies"] = selfies.encoder(graph["ligand_smiles"])
+
         graph = build_ligand_graph(graph, ligand, include_absolute_coordinates=include_absolute_coordinates,
                                    use_ligand_centroid=self.use_ligand_centroid)
         return graph
         
-    def _compute_label(self, pl_complex: ProteinLigandComplex) -> float:
+    def _compute_label(self, graph: HeteroData) -> float:
         """
         Compute true labels from the ProteinLigandComplex information.
-        :param pl_complex: ProteinLigandComplex object containing paths to the protein and ligand files. In this
-         function, a ligand SMILES does not suffice, as we need the true ligand coordinates to compute the label.
-        :return: the item label as a float number measuring whether the pocket is the closest to the ligand.
+        :param graph: a loaded graph containing protein and ligand data. We assume the true coordinates of the ligand
+          are known; otherwise, the centroid of the ligand will be set to equal the centroid of the protein
+          and the label will always be 1.
+        :return: the item label as a float number measuring whether the pocket is close to the ligand.
         """
-        raise NotImplementedError
+        protein_centroid = graph["pocket_centroid"] if graph["pocket_centroid"] != {} else graph["centroid"]
+        if torch.linalg.norm(protein_centroid - graph["ligand_centroid"]) < self.centroid_threshold:
+            return 1.0
+        return 0.0
 
     def get(self, index: int) -> Union[HeteroData, tuple[HeteroData, float]]:
         """
@@ -155,6 +164,6 @@ class PDBBindDataset(Dataset):
             out["pocket_centroid"] = out["centroid"]
 
         if self.include_label:
-            label = self._compute_label(pl_complex)
+            label = self._compute_label(out)
             return out, label
         return out
