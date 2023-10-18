@@ -5,7 +5,10 @@ import torch
 from torch.utils.data import WeightedRandomSampler
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
+import wandb
 
+import sys
+sys.path.append("/home/dit905/dit/two_step_docking")
 from dataloader.pdbbind_dataset import PDBBindDataset
 from dataloader.protein_ligand_complex import ProteinLigandComplex
 from models.pocket_scoring.AffinityScoring import AffinityScoring
@@ -32,16 +35,17 @@ def evaluate_ranking(model: torch.nn.Module, pl_complexes: list[ProteinLigandCom
 
 
 def get_split_names(pockets_path: str, train_split_path: str, val_split_path: str, test_split_path: str):
+    all_pl_names = os.listdir(pockets_path)
     if train_split_path is not None and val_split_path is not None and test_split_path is not None:
         with open(train_split_path, "r") as train_file:
-            train_pl_names = train_file.readlines()
+            train_pl_names = list(filter(lambda x: x in all_pl_names, [name.strip() for name in train_file.readlines()]))
         with open(val_split_path, "r") as val_file:
-            val_pl_names = val_file.readlines()
+            val_pl_names = list(filter(lambda x: x in all_pl_names, [name.strip() for name in val_file.readlines()]))
         with open(test_split_path, "r") as test_file:
-            test_pl_names = test_file.readlines()
+            test_pl_names = list(filter(lambda x: x in all_pl_names, [name.strip() for name in test_file.readlines()]))
     else:
-        all_pl_names = os.listdir(pockets_path)
         train_pl_names, val_pl_names, test_pl_names = torch.utils.data.random_split(all_pl_names, lengths=[0.7, 0.2, 0.1])
+    print(f"{len(train_pl_names)=}, {len(val_pl_names)=}, {len(test_pl_names)=}")
     return train_pl_names, val_pl_names, test_pl_names
 
 
@@ -65,7 +69,7 @@ def get_loader(pl_names: list[str], batch_size: int, pockets_path: str, ligands_
                 ProteinLigandComplex(
                     name=pl_name,
                     protein_path=os.path.join(pockets_path, pl_name, pocket),
-                    ligand_path=os.path.join(ligands_path, pl_name, f"{pl_name}_ligand.sdf")
+                    ligand_path=os.path.join(ligands_path, pl_name, f"{pl_name}_ligand.mol2")
                 )
             )
 
@@ -108,8 +112,24 @@ def valid_epoch(model, loader, loss_fn):
 
 
 def train(namespace: argparse.Namespace, device: torch.device):
+    
+    wandb.init(
+        project="pocket_ranking",
+        
+        # track hyperparameters and run metadata
+        config={
+            "learning_rate": namespace.lr,
+            "batch_size": namespace.batch_size,
+            "pockets_path": namespace.pockets_path,
+            "train_split_path": namespace.train_split_path,
+            "val_split_path": namespace.val_split_path,
+            "test_split_pathn": namespace.test_split_path,
+            "epochs": namespace.epochs,
+        }
+    )
+    
     model = AffinityScoring().train().to(device)
-    optimizer = torch.optim.NAdam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.NAdam(model.parameters(), lr=namespace.lr)
     loss_fn = torch.nn.BCELoss().to(device)
 
     train_pl_names, val_pl_names, test_pl_names = get_split_names(namespace.pockets_path,
@@ -117,13 +137,13 @@ def train(namespace: argparse.Namespace, device: torch.device):
                                                                   namespace.val_split_path,
                                                                   namespace.test_split_path)
 
-    train_pl_complexes, train_loader = get_loader(train_pl_names, batch_size=32,
+    train_pl_complexes, train_loader = get_loader(train_pl_names, batch_size=namespace.batch_size,
                                                   pockets_path=namespace.pockets_path,
                                                   ligands_path=namespace.ligands_path,
                                                   p2rank_cache=namespace.p2rank_cache,
                                                   shuffle=False, oversample=True)
 
-    val_pl_complexes, val_loader = get_loader(val_pl_names, batch_size=32,
+    val_pl_complexes, val_loader = get_loader(val_pl_names, namespace.batch_size,
                                               pockets_path=namespace.pockets_path,
                                               ligands_path=namespace.ligands_path,
                                               p2rank_cache=namespace.p2rank_cache,
@@ -135,11 +155,17 @@ def train(namespace: argparse.Namespace, device: torch.device):
         if epoch % 10 == 0:
             valid_loss = valid_epoch(model=model, loader=val_loader, loss_fn=loss_fn)
             ranking_accuracy = evaluate_ranking(model, val_pl_complexes)
-            print(epoch_loss, valid_loss, ranking_accuracy)
+            wandb.log({
+                "epoch": epoch,
+                "train_loss": epoch_loss, 
+                "val_loss": valid_loss, 
+                "ranking_accuracy": ranking_accuracy
+            })
 
 
 if __name__ == '__main__':
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    print(f"Using device {device}")
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--pockets_path", type=str,
@@ -151,7 +177,11 @@ if __name__ == '__main__':
     parser.add_argument("--train_split_path", type=str, default=None)
     parser.add_argument("--val_split_path", type=str, default=None)
     parser.add_argument("--test_split_path", type=str, default=None)
+    
     parser.add_argument("--epochs", type=int, default=50)
+    parser.add_argument("--lr", type=float, default=0.001)
+    parser.add_argument("--batch_size", type=int, default=32)
+    
     namespace = parser.parse_args()
 
     train(namespace, device)

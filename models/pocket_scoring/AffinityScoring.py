@@ -38,7 +38,6 @@ class AffinityScoring(torch.nn.Module):
         protein_embedding = self.protein_embedding(inputs)
         ligand_embedding = self.ligand_embedding(inputs["ligand"].x[:, 0],
                                                  inputs["ligand"].pos.float(),
-                                                 inputs["ligand", "bond", "ligand"].edge_index,
                                                  inputs["ligand"].batch)
         embeddings = torch.concat([protein_embedding[0], ligand_embedding], dim=-1)
         out = self.mlp_head(embeddings)

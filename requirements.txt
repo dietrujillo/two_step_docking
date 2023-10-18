@@ -2,9 +2,11 @@ numpy~=1.25.1
 pandas~=2.0.3
 rdkit~=2023.3.2
 dask~=2023.7.1
-torch~=2.0.1
 biopython~=1.81
 tqdm~=4.65.0
 e3nn~=0.5.1
 scipy~=1.11.1
 spyrmsd~=0.5.2
+selfies
+performer-pytorch
+wandb
