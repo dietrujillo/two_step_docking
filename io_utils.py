@@ -19,6 +19,10 @@ def read_ligand(ligand_path: str, include_hydrogen: bool = True):
         ligand = MolFromPDBFile(ligand_path)
     else:
         raise ValueError(f"Input ligand file must be one of {{.sdf, .mol2, .pdb}} file. Got {ligand_path}")
+
+    if ligand is None:
+        raise ValueError(f"Ligand {ligand_path} could not be read.")
+
     if include_hydrogen:
         ligand = AddHs(ligand, addCoords=True)
     return ligand

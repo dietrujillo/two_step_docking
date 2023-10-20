@@ -115,8 +115,6 @@ def train(namespace: argparse.Namespace, device: torch.device):
     
     wandb.init(
         project="pocket_ranking",
-        
-        # track hyperparameters and run metadata
         config={
             "learning_rate": namespace.lr,
             "batch_size": namespace.batch_size,

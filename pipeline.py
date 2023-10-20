@@ -382,22 +382,20 @@ class TwoStepBlindDocking:
 
         rmsd_dict = {}
         validity_dict = {}
-        for pl_complex in pl_complexes:
+        for pl_complex in tqdm(pl_complexes):
             pl_complex_predictions_path = os.path.join(self.docking_predictions_path, pl_complex.name)
             if os.listdir(pl_complex_predictions_path):
-                sorted_ligands = sorted(filter(lambda x: x.endswith(".sdf"), os.listdir(pl_complex_predictions_path)),
+                final_prediction_path = os.path.join(pl_complex_predictions_path, f"{pl_complex.name}_ligand_prediction.sdf")
+                sorted_ligands = sorted(filter(lambda x: x.endswith(".sdf") and x != os.path.basename(final_prediction_path),
+                                               os.listdir(pl_complex_predictions_path)),
                                         key=lambda x: float(x.split("score")[1].split(".sdf")[0]))
-                shutil.copyfile(os.path.join(pl_complex_predictions_path, sorted_ligands[0]),
-                                os.path.join(pl_complex_predictions_path, f"{pl_complex.name}_ligand_prediction.sdf"))
+                shutil.copyfile(os.path.join(pl_complex_predictions_path, sorted_ligands[0]), final_prediction_path)
 
-                rmsd = self._evaluate_rmsd(pl_complex, os.path.join(pl_complex_predictions_path,
-                                                                    f"{pl_complex.name}_ligand_prediction.sdf"))
+                rmsd = self._evaluate_rmsd(pl_complex, final_prediction_path)
+                
                 if rmsd is not None:
                     rmsd_dict[pl_complex.name] = rmsd
-                    validity_dict[pl_complex.name] = self._evaluate_validity(
-                        pl_complex,
-                        os.path.join(pl_complex_predictions_path,f"{pl_complex.name}_ligand_prediction.sdf")
-                    )
+                    validity_dict[pl_complex.name] = self._evaluate_validity(pl_complex, final_prediction_path)
 
         results = {
             "rmsd_under_1A": len(list(filter(lambda x: x <= 1, rmsd_dict.values()))) / len(rmsd_dict),
