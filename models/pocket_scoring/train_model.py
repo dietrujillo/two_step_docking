@@ -1,4 +1,5 @@
 import argparse
+import logging
 import os
 import sys
 
@@ -35,31 +36,15 @@ def evaluate_ranking(model: torch.nn.Module, pl_complexes: list[ProteinLigandCom
     return sum(correct_rank) / len(correct_rank)
 
 
-def is_valid_ligand(name: str, ligands_path: str):
-    try:
-        ligand = read_ligand(os.path.join(ligands_path, name, f"{name}_ligand.sdf"))
-        if ligand is not None:
-            return True
-        else:
-            ligand = read_ligand(os.path.join(ligands_path, name, f"{name}_ligand.mol2"))
-            if ligand is not None:
-                return True
-    except OSError:
-        return False
-
-
-def get_split_names(pockets_path: str, ligands_path: str, train_split_path: str, val_split_path: str, test_split_path: str):
+def get_split_names(pockets_path: str, train_split_path: str, val_split_path: str, test_split_path: str):
     all_pl_names = os.listdir(pockets_path)
     if train_split_path is not None and val_split_path is not None and test_split_path is not None:
         with open(train_split_path, "r") as train_file:
-            train_pl_names = list(filter(lambda x: x in all_pl_names and is_valid_ligand(x, ligands_path),
-                                         [name.strip() for name in train_file.readlines()]))
+            train_pl_names = list(filter(lambda x: x in all_pl_names, [name.strip() for name in train_file.readlines()]))
         with open(val_split_path, "r") as val_file:
-            val_pl_names = list(filter(lambda x: x in all_pl_names and is_valid_ligand(x, ligands_path),
-                                       [name.strip() for name in val_file.readlines()]))
+            val_pl_names = list(filter(lambda x: x in all_pl_names, [name.strip() for name in val_file.readlines()]))
         with open(test_split_path, "r") as test_file:
-            test_pl_names = list(filter(lambda x: x in all_pl_names and is_valid_ligand(x, ligands_path),
-                                        [name.strip() for name in test_file.readlines()]))
+            test_pl_names = list(filter(lambda x: x in all_pl_names, [name.strip() for name in test_file.readlines()]))
     else:
         train_pl_names, val_pl_names, test_pl_names = torch.utils.data.random_split(all_pl_names, lengths=[0.7, 0.2, 0.1])
     print(f"{len(train_pl_names)=}, {len(val_pl_names)=}, {len(test_pl_names)=}")
@@ -82,13 +67,19 @@ def get_loader(pl_names: list[str], batch_size: int, pockets_path: str, ligands_
     pl_complexes = []
     for pl_name in pl_names:
         for pocket in os.listdir(os.path.join(pockets_path, pl_name)):
-            pl_complexes.append(
-                ProteinLigandComplex(
-                    name=pl_name,
-                    protein_path=os.path.join(pockets_path, pl_name, pocket),
-                    ligand_path=os.path.join(ligands_path, pl_name, f"{pl_name}_ligand.mol2")
-                )
-            )
+            try:
+                ligand = read_ligand(os.path.join(ligands_path, pl_name, f"{pl_name}_ligand.mol2"),
+                                     include_hydrogen=include_hydrogen)
+                if ligand is not None:
+                    pl_complexes.append(
+                        ProteinLigandComplex(
+                            name=pl_name,
+                            protein_path=os.path.join(pockets_path, pl_name, pocket),
+                            ligand_path=os.path.join(ligands_path, pl_name, f"{pl_name}_ligand.mol2")
+                        )
+                    )
+            except OSError:
+                logging.warning(f"Could not read ligand for {pl_name}. Skipping.")
 
     dataset = PDBBindDataset(pl_complexes, include_label=True, include_hydrogen=include_hydrogen,
                              pocket_predictions_dir=p2rank_cache, centroid_threshold=centroid_threshold)
@@ -138,7 +129,7 @@ def train(namespace: argparse.Namespace, device: torch.device):
             "pockets_path": namespace.pockets_path,
             "train_split_path": namespace.train_split_path,
             "val_split_path": namespace.val_split_path,
-            "test_split_pathn": namespace.test_split_path,
+            "test_split_path": namespace.test_split_path,
             "epochs": namespace.epochs,
         }
     )
@@ -148,7 +139,6 @@ def train(namespace: argparse.Namespace, device: torch.device):
     loss_fn = torch.nn.BCELoss().to(device)
 
     train_pl_names, val_pl_names, test_pl_names = get_split_names(namespace.pockets_path,
-                                                                  namespace.ligands_path,
                                                                   namespace.train_split_path,
                                                                   namespace.val_split_path,
                                                                   namespace.test_split_path)
