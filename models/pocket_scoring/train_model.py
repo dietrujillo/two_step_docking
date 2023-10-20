@@ -1,18 +1,19 @@
 import argparse
 import os
+import sys
 
 import torch
 from torch.utils.data import WeightedRandomSampler
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
+
 import wandb
 
-import sys
 sys.path.append("/home/dit905/dit/two_step_docking")
 from dataloader.pdbbind_dataset import PDBBindDataset
 from dataloader.protein_ligand_complex import ProteinLigandComplex
 from models.pocket_scoring.AffinityScoring import AffinityScoring
-
+from io_utils import read_ligand
 
 def evaluate_ranking(model: torch.nn.Module, pl_complexes: list[ProteinLigandComplex]):
     model.eval()
@@ -34,15 +35,31 @@ def evaluate_ranking(model: torch.nn.Module, pl_complexes: list[ProteinLigandCom
     return sum(correct_rank) / len(correct_rank)
 
 
-def get_split_names(pockets_path: str, train_split_path: str, val_split_path: str, test_split_path: str):
+def is_valid_ligand(name: str, ligands_path: str):
+    try:
+        ligand = read_ligand(os.path.join(ligands_path, name, f"{name}_ligand.sdf"))
+        if ligand is not None:
+            return True
+        else:
+            ligand = read_ligand(os.path.join(ligands_path, name, f"{name}_ligand.mol2"))
+            if ligand is not None:
+                return True
+    except OSError:
+        return False
+
+
+def get_split_names(pockets_path: str, ligands_path: str, train_split_path: str, val_split_path: str, test_split_path: str):
     all_pl_names = os.listdir(pockets_path)
     if train_split_path is not None and val_split_path is not None and test_split_path is not None:
         with open(train_split_path, "r") as train_file:
-            train_pl_names = list(filter(lambda x: x in all_pl_names, [name.strip() for name in train_file.readlines()]))
+            train_pl_names = list(filter(lambda x: x in all_pl_names and is_valid_ligand(x, ligands_path),
+                                         [name.strip() for name in train_file.readlines()]))
         with open(val_split_path, "r") as val_file:
-            val_pl_names = list(filter(lambda x: x in all_pl_names, [name.strip() for name in val_file.readlines()]))
+            val_pl_names = list(filter(lambda x: x in all_pl_names and is_valid_ligand(x, ligands_path),
+                                       [name.strip() for name in val_file.readlines()]))
         with open(test_split_path, "r") as test_file:
-            test_pl_names = list(filter(lambda x: x in all_pl_names, [name.strip() for name in test_file.readlines()]))
+            test_pl_names = list(filter(lambda x: x in all_pl_names and is_valid_ligand(x, ligands_path),
+                                        [name.strip() for name in test_file.readlines()]))
     else:
         train_pl_names, val_pl_names, test_pl_names = torch.utils.data.random_split(all_pl_names, lengths=[0.7, 0.2, 0.1])
     print(f"{len(train_pl_names)=}, {len(val_pl_names)=}, {len(test_pl_names)=}")
@@ -131,6 +148,7 @@ def train(namespace: argparse.Namespace, device: torch.device):
     loss_fn = torch.nn.BCELoss().to(device)
 
     train_pl_names, val_pl_names, test_pl_names = get_split_names(namespace.pockets_path,
+                                                                  namespace.ligands_path,
                                                                   namespace.train_split_path,
                                                                   namespace.val_split_path,
                                                                   namespace.test_split_path)
@@ -169,7 +187,7 @@ if __name__ == '__main__':
     parser.add_argument("--pockets_path", type=str,
                         default="/home/diego/Universidad/Harvard/Lab/docking/.generated_pockets")
     parser.add_argument("--ligands_path", type=str,
-                        default="/home/diego/Universidad/Harvard/Lab/docking/data/posebusters_paper_data/posebusters_benchmark_set")
+                        default="/home/diego/Universidad/Harvard/Lab/docking/data/PDBBind_processed")
     parser.add_argument("--p2rank_cache", type=str,
                         default="/home/diego/Universidad/Harvard/Lab/docking/.p2rank_cache/p2rank_output")
     parser.add_argument("--train_split_path", type=str, default=None)

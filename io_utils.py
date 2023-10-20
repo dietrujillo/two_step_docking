@@ -20,15 +20,13 @@ def read_ligand(ligand_path: str, include_hydrogen: bool = True):
     else:
         raise ValueError(f"Input ligand file must be one of {{.sdf, .mol2, .pdb}} file. Got {ligand_path}")
 
-    if ligand is None:
-        raise ValueError(f"Ligand {ligand_path} could not be read.")
-
-    if include_hydrogen:
+    if ligand is not None and include_hydrogen:
         ligand = AddHs(ligand, addCoords=True)
     return ligand
 
 
 def write_ligand(ligand_path: str, ligand: Chem.Mol):
+    ligand = AddHs(ligand, addCoords=True)
     writer = Chem.SDWriter(ligand_path)
     writer.write(ligand, confId=0)
 
