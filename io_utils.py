@@ -9,14 +9,14 @@ from rdkit.Geometry import Point3D
 from torch_geometric.data import HeteroData
 
 
-def read_ligand(ligand_path: str, include_hydrogen: bool = True):
+def read_ligand(ligand_path: str, include_hydrogen: bool = True, sanitize: bool = True):
     if ligand_path.endswith(".sdf"):
-        supplier = SDMolSupplier(ligand_path)
+        supplier = SDMolSupplier(ligand_path, sanitize=sanitize)
         ligand = supplier.__getitem__(0)
     elif ligand_path.endswith(".mol2"):
-        ligand = MolFromMol2File(ligand_path)
+        ligand = MolFromMol2File(ligand_path, sanitize=sanitize)
     elif ligand_path.endswith(".pdb"):
-        ligand = MolFromPDBFile(ligand_path)
+        ligand = MolFromPDBFile(ligand_path, sanitize=sanitize)
     else:
         raise ValueError(f"Input ligand file must be one of {{.sdf, .mol2, .pdb}} file. Got {ligand_path}")
 

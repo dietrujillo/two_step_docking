@@ -26,6 +26,7 @@ class PDBBindDataset(Dataset):
         use_ligand_centroid: bool = False,
         centroid_threshold: float = 10.0,
         pocket_predictions_dir: str = ".p2rank_cache/p2rank_output",
+        sanitize: bool = True,
         **kwargs
     ):
         """
@@ -43,6 +44,7 @@ class PDBBindDataset(Dataset):
         self.use_ligand_centroid = use_ligand_centroid
         self.centroid_threshold = centroid_threshold
         self.pocket_predictions_dir = pocket_predictions_dir
+        self.sanitize = sanitize
 
     def len(self) -> int:
         """
@@ -105,11 +107,12 @@ class PDBBindDataset(Dataset):
                 )
                 include_absolute_coordinates = False
         else:
-            ligand = read_ligand(graph["ligand_path"], include_hydrogen=self.include_hydrogen)
+            ligand = read_ligand(graph["ligand_path"], include_hydrogen=self.include_hydrogen, sanitize=self.sanitize)
         graph["rdkit_ligand"] = ligand
 
         if graph["ligand_reference_path"] != {}:
-            reference_ligand = read_ligand(graph["ligand_reference_path"], include_hydrogen=self.include_hydrogen)
+            reference_ligand = read_ligand(graph["ligand_reference_path"], include_hydrogen=self.include_hydrogen,
+                                           sanitize=self.sanitize)
             graph["rdkit_reference_ligand"] = reference_ligand
 
         if graph["ligand_smiles"] == {}:

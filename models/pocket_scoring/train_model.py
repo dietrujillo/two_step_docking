@@ -63,13 +63,14 @@ def get_oversampler(dataset):
 
 
 def get_loader(pl_names: list[str], batch_size: int, pockets_path: str, ligands_path: str, p2rank_cache: str,
-               include_hydrogen: bool = True, centroid_threshold: int = 20, shuffle=True, oversample=False):
+               include_hydrogen: bool = True, centroid_threshold: int = 20, shuffle=True, oversample=False,
+               sanitize: bool = True):
     pl_complexes = []
     for pl_name in pl_names:
         for pocket in os.listdir(os.path.join(pockets_path, pl_name)):
             try:
                 ligand = read_ligand(os.path.join(ligands_path, pl_name, f"{pl_name}_ligand.mol2"),
-                                     include_hydrogen=include_hydrogen)
+                                     include_hydrogen=include_hydrogen, sanitize=sanitize)
                 if ligand is not None:
                     pl_complexes.append(
                         ProteinLigandComplex(
@@ -82,7 +83,8 @@ def get_loader(pl_names: list[str], batch_size: int, pockets_path: str, ligands_
                 logging.warning(f"Could not read ligand for {pl_name}. Skipping.")
 
     dataset = PDBBindDataset(pl_complexes, include_label=True, include_hydrogen=include_hydrogen,
-                             pocket_predictions_dir=p2rank_cache, centroid_threshold=centroid_threshold)
+                             pocket_predictions_dir=p2rank_cache, centroid_threshold=centroid_threshold,
+                             sanitize=sanitize)
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle,
                         sampler=(get_oversampler(dataset) if shuffle and oversample else None))
     return pl_complexes, loader
@@ -147,13 +149,13 @@ def train(namespace: argparse.Namespace, device: torch.device):
                                                   pockets_path=namespace.pockets_path,
                                                   ligands_path=namespace.ligands_path,
                                                   p2rank_cache=namespace.p2rank_cache,
-                                                  shuffle=False, oversample=True)
+                                                  shuffle=False, oversample=True, sanitize=False)
 
     val_pl_complexes, val_loader = get_loader(val_pl_names, namespace.batch_size,
                                               pockets_path=namespace.pockets_path,
                                               ligands_path=namespace.ligands_path,
                                               p2rank_cache=namespace.p2rank_cache,
-                                              shuffle=False, oversample=False)
+                                              shuffle=False, oversample=False, sanitize=False)
 
     for epoch in range(namespace.epochs):
         epoch_loss = train_epoch(model=model, loader=train_loader, optimizer=optimizer, loss_fn=loss_fn, device=device)
