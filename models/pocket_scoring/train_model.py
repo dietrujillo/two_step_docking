@@ -16,6 +16,7 @@ from dataloader.protein_ligand_complex import ProteinLigandComplex
 from models.pocket_scoring.AffinityScoring import AffinityScoring
 from io_utils import read_ligand
 
+
 def evaluate_ranking(model: torch.nn.Module, pl_complexes: list[ProteinLigandComplex]):
     model.eval()
     correct_rank = []

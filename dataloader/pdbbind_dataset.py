@@ -72,7 +72,7 @@ class PDBBindDataset(Dataset):
             if len(p2rank_predictions) != 0:
                 logging.error(f"pocket_centroid exception when accessing p2rank prediction table. "
                               f"{pl_complex.name=}, {pl_complex.protein_path=}, {len(p2rank_predictions)=}, {pocket_num=}")
-            return 0, None
+            return 0, pd.Series({"name": "pocket0", "rank": 1})
         return pocket_num, pocket_prediction
 
     def _add_protein_graph(self, graph: HeteroData) -> HeteroData:
@@ -157,7 +157,7 @@ class PDBBindDataset(Dataset):
         pocket_num, pocket_prediction = self.get_pocket_prediction(pl_complex)
         out["pocket_num"] = pocket_num
         out["pocket_prediction"] = pocket_prediction
-        if pocket_prediction is not None:
+        if "score" in pocket_prediction:
             centroid = torch.Tensor(
                 [pocket_prediction["   center_x"], pocket_prediction["   center_y"], pocket_prediction["   center_z"]])
             out["pocket_centroid"] = centroid
