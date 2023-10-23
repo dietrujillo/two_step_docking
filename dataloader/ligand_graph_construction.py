@@ -1,8 +1,3 @@
-"""
-Adapted from DiffDock (Corso et al. (2022). DiffDock: Diffusion steps, twists, and turns for
- molecular docking. arXiv preprint arXiv:2210.01776.)
-"""
-
 import torch
 from rdkit.Chem import Mol as Molecule
 from rdkit.Chem.rdchem import BondType
@@ -25,13 +20,6 @@ VALID_FEATURES = {
     "possible_numH_list": [0, 1, 2, 3, 4, 5, 6, 7, 8, "misc"],
     "possible_number_radical_e_list": [0, 1, 2, 3, 4, "misc"],
     "possible_hybridization_list": ["SP", "SP2", "SP3", "SP3D", "SP3D2", "misc"],
-    "possible_is_aromatic_list": [False, True],
-    "possible_is_in_ring3_list": [False, True],
-    "possible_is_in_ring4_list": [False, True],
-    "possible_is_in_ring5_list": [False, True],
-    "possible_is_in_ring6_list": [False, True],
-    "possible_is_in_ring7_list": [False, True],
-    "possible_is_in_ring8_list": [False, True],
     "possible_atom_type_2": [
         "C*",
         "CA",
@@ -112,6 +100,9 @@ def _safe_index(lst, item) -> int:
 
 def get_ligand_features(ligand: Molecule) -> torch.Tensor:
     """
+    Adapted from DiffDock (Corso et al. (2022). DiffDock: Diffusion steps, twists, and turns for
+     molecular docking. arXiv preprint arXiv:2210.01776.)
+
     Obtain atom features for the nodes in the ligand graph.
     :param ligand: RDKit Mol ligand structure.
     :return: Node feature matrix.
@@ -121,55 +112,22 @@ def get_ligand_features(ligand: Molecule) -> torch.Tensor:
     for atom_index, atom in enumerate(ligand.GetAtoms()):
         atom_features_list.append(
             [
-                _safe_index(
-                    VALID_FEATURES["possible_atomic_num_list"], str(atom.GetAtomicNum())
-                ),
-                VALID_FEATURES["possible_chirality_list"].index(
-                    str(atom.GetChiralTag())
-                ),
-                _safe_index(
-                    VALID_FEATURES["possible_degree_list"], atom.GetTotalDegree()
-                ),
-                _safe_index(
-                    VALID_FEATURES["possible_formal_charge_list"],
-                    atom.GetFormalCharge(),
-                ),
-                _safe_index(
-                    VALID_FEATURES["possible_implicit_valence_list"],
-                    atom.GetImplicitValence(),
-                ),
+                _safe_index(VALID_FEATURES["possible_atomic_num_list"], str(atom.GetAtomicNum())),
+                _safe_index(VALID_FEATURES["possible_chirality_list"], str(atom.GetChiralTag())),
+                _safe_index(VALID_FEATURES["possible_degree_list"], atom.GetTotalDegree()),
+                _safe_index(VALID_FEATURES["possible_formal_charge_list"], atom.GetFormalCharge(),),
+                _safe_index(VALID_FEATURES["possible_implicit_valence_list"], atom.GetImplicitValence()),
                 _safe_index(VALID_FEATURES["possible_numH_list"], atom.GetTotalNumHs()),
-                _safe_index(
-                    VALID_FEATURES["possible_number_radical_e_list"],
-                    atom.GetNumRadicalElectrons(),
-                ),
-                _safe_index(
-                    VALID_FEATURES["possible_hybridization_list"],
-                    str(atom.GetHybridization()),
-                ),
-                VALID_FEATURES["possible_is_aromatic_list"].index(atom.GetIsAromatic()),
-                _safe_index(
-                    VALID_FEATURES["possible_numring_list"],
-                    ring_info.NumAtomRings(atom_index),
-                ),
-                VALID_FEATURES["possible_is_in_ring3_list"].index(
-                    ring_info.IsAtomInRingOfSize(atom_index, 3)
-                ),
-                VALID_FEATURES["possible_is_in_ring4_list"].index(
-                    ring_info.IsAtomInRingOfSize(atom_index, 4)
-                ),
-                VALID_FEATURES["possible_is_in_ring5_list"].index(
-                    ring_info.IsAtomInRingOfSize(atom_index, 5)
-                ),
-                VALID_FEATURES["possible_is_in_ring6_list"].index(
-                    ring_info.IsAtomInRingOfSize(atom_index, 6)
-                ),
-                VALID_FEATURES["possible_is_in_ring7_list"].index(
-                    ring_info.IsAtomInRingOfSize(atom_index, 7)
-                ),
-                VALID_FEATURES["possible_is_in_ring8_list"].index(
-                    ring_info.IsAtomInRingOfSize(atom_index, 8)
-                ),
+                _safe_index(VALID_FEATURES["possible_number_radical_e_list"], atom.GetNumRadicalElectrons()),
+                _safe_index(VALID_FEATURES["possible_hybridization_list"], str(atom.GetHybridization())),
+                _safe_index(VALID_FEATURES["possible_numring_list"], ring_info.NumAtomRings(atom_index)),
+                int(atom.GetIsAromatic()),
+                int(ring_info.IsAtomInRingOfSize(atom_index, 3)),
+                int(ring_info.IsAtomInRingOfSize(atom_index, 4)),
+                int(ring_info.IsAtomInRingOfSize(atom_index, 5)),
+                int(ring_info.IsAtomInRingOfSize(atom_index, 6)),
+                int(ring_info.IsAtomInRingOfSize(atom_index, 7)),
+                int(ring_info.IsAtomInRingOfSize(atom_index, 8)),
             ]
         )
 
