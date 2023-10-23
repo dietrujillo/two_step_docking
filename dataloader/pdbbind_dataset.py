@@ -1,9 +1,9 @@
 import logging
 import os
+import pickle
 from typing import Union, Optional
 
 import pandas as pd
-import selfies
 import torch
 from Bio.PDB import PDBParser
 from rdkit.Chem import MolFromSmiles, AddHs, MolToSmiles
@@ -27,6 +27,7 @@ class PDBBindDataset(Dataset):
         centroid_threshold: float = 10.0,
         pocket_predictions_dir: str = ".p2rank_cache/p2rank_output",
         sanitize: bool = True,
+        preprocessed_cache_file: str = ".preprocessed_data.pkl",
         **kwargs
     ):
         """
@@ -45,6 +46,12 @@ class PDBBindDataset(Dataset):
         self.centroid_threshold = centroid_threshold
         self.pocket_predictions_dir = pocket_predictions_dir
         self.sanitize = sanitize
+        self.preprocessed_cache_file = preprocessed_cache_file
+
+        if not os.path.exists(self.preprocessed_cache_file):
+            self.preprocess_graphs()
+        with open(self.preprocessed_cache_file, "rb") as file:
+            self.preprocessed_data = pickle.load(file)
 
     def len(self) -> int:
         """
@@ -136,7 +143,8 @@ class PDBBindDataset(Dataset):
             return 1.0
         return 0.0
 
-    def get(self, index: int) -> Union[HeteroData, tuple[HeteroData, float]]:
+
+    def preprocess_graph_index(self, index: int):
         """
         Retrieve graph at a given index.
         :param index: index of the data to get.
@@ -168,3 +176,13 @@ class PDBBindDataset(Dataset):
             label = self._compute_label(out)
             return out, label
         return out
+
+    def preprocess_graphs(self):
+        preprocessed_graphs = []
+        for index in range(len(self.data)):
+            preprocessed_graphs.append(self.preprocess_graph_index(index))
+        with open(self.preprocessed_cache_file, "wb") as file:
+            pickle.dump(preprocessed_graphs, file)
+
+    def get(self, index: int) -> Union[HeteroData, tuple[HeteroData, float]]:
+        return self.preprocessed_data[index]
