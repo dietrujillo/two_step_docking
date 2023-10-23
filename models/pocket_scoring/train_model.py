@@ -122,6 +122,12 @@ def valid_epoch(model, loader, loss_fn):
     return validation_loss
 
 
+def model_checkpoint(model, filename, checkpoints_dir: str = ".checkpoints"):
+    checkpoint_path = os.path.join(checkpoints_dir, filename)
+    os.makedirs(checkpoints_dir, exist_ok=True)
+    torch.save(model.state_dict(), checkpoint_path)
+
+
 def train(namespace: argparse.Namespace, device: torch.device):
     
     wandb.init(
@@ -158,16 +164,30 @@ def train(namespace: argparse.Namespace, device: torch.device):
                                               p2rank_cache=namespace.p2rank_cache,
                                               shuffle=False, oversample=False, sanitize=False)
 
+    best_ranking_accuracy = 0.
+    best_epoch = 0.
+    early_stopping_patience = 5
+
     for epoch in range(namespace.epochs):
         epoch_loss = train_epoch(model=model, loader=train_loader, optimizer=optimizer, loss_fn=loss_fn, device=device)
         valid_loss = valid_epoch(model=model, loader=val_loader, loss_fn=loss_fn)
         ranking_accuracy = evaluate_ranking(model, val_pl_complexes)
+
+        if ranking_accuracy > best_ranking_accuracy:
+            best_ranking_accuracy = ranking_accuracy
+            best_epoch = epoch
+            model_checkpoint(model, "best_model.pth")
+
         wandb.log({
             "epoch": epoch,
             "train_loss": epoch_loss, 
             "val_loss": valid_loss, 
             "ranking_accuracy": ranking_accuracy
         })
+
+        if best_epoch - epoch > early_stopping_patience:
+            logging.info(f"Early stopping at epoch {epoch}.")
+            break
 
 
 if __name__ == '__main__':
