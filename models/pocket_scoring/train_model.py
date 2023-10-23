@@ -159,16 +159,14 @@ def train(namespace: argparse.Namespace, device: torch.device):
 
     for epoch in range(namespace.epochs):
         epoch_loss = train_epoch(model=model, loader=train_loader, optimizer=optimizer, loss_fn=loss_fn, device=device)
-
-        if epoch % 10 == 0:
-            valid_loss = valid_epoch(model=model, loader=val_loader, loss_fn=loss_fn)
-            ranking_accuracy = evaluate_ranking(model, val_pl_complexes)
-            wandb.log({
-                "epoch": epoch,
-                "train_loss": epoch_loss, 
-                "val_loss": valid_loss, 
-                "ranking_accuracy": ranking_accuracy
-            })
+        valid_loss = valid_epoch(model=model, loader=val_loader, loss_fn=loss_fn)
+        ranking_accuracy = evaluate_ranking(model, val_pl_complexes)
+        wandb.log({
+            "epoch": epoch,
+            "train_loss": epoch_loss, 
+            "val_loss": valid_loss, 
+            "ranking_accuracy": ranking_accuracy
+        })
 
 
 if __name__ == '__main__':

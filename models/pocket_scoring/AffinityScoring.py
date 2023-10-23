@@ -41,4 +41,4 @@ class AffinityScoring(torch.nn.Module):
                                                  inputs["ligand"].batch)
         embeddings = torch.concat([protein_embedding[0], ligand_embedding], dim=-1)
         out = self.mlp_head(embeddings)
-        return out
+        return torch.nan_to_num(out)

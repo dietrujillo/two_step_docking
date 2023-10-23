@@ -119,8 +119,6 @@ class PDBBindDataset(Dataset):
             del graph["ligand_smiles"]
             graph["ligand_smiles"] = MolToSmiles(ligand)
 
-        graph["ligand_selfies"] = selfies.encoder(graph["ligand_smiles"])
-
         graph = build_ligand_graph(graph, ligand, include_absolute_coordinates=include_absolute_coordinates,
                                    use_ligand_centroid=self.use_ligand_centroid)
         return graph
