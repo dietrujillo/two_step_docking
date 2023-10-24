@@ -6,6 +6,7 @@ import sys
 import torch
 from torch.utils.data import WeightedRandomSampler
 from torch_geometric.loader import DataLoader
+from torchmetrics.classification import BinaryAccuracy
 from tqdm import tqdm
 
 import wandb
@@ -22,7 +23,14 @@ def evaluate_ranking(model: torch.nn.Module, pl_complexes: list[ProteinLigandCom
     correct_rank = []
     pl_complex_names = set([c.name for c in pl_complexes])
     for protein in pl_complex_names:
-        protein_complexes = list(filter(lambda x: x.name == protein, pl_complexes))
+        protein_complexes = []
+        for pl_complex in filter(lambda x: x.name == protein, pl_complexes):
+            try:
+                ligand = read_ligand(pl_complex.ligand_path, include_hydrogen=True, sanitize=False)
+                if ligand is not None:
+                    protein_complexes.append(pl_complex)
+            except OSError:
+                logging.warning(f"Could not read ligand for {pl_complex.name}. Skipping.")
         dataset = PDBBindDataset(protein_complexes, include_label=True,
                                  pocket_predictions_dir=namespace.p2rank_cache,
                                  centroid_threshold=20)
@@ -94,6 +102,8 @@ def get_loader(pl_names: list[str], batch_size: int, pockets_path: str, ligands_
 def train_epoch(model, loader, optimizer, loss_fn, device):
     model.train()
     epoch_loss = 0.
+    predictions = []
+    labels_list = []
     for i, data in enumerate(tqdm(loader)):
         inputs, labels = data
         inputs = inputs.to(device)
@@ -106,12 +116,17 @@ def train_epoch(model, loader, optimizer, loss_fn, device):
         optimizer.step()
 
         epoch_loss += loss.item()
-    return epoch_loss
+        predictions.extend(torch.round(outputs))
+        labels_list.extend(labels.float().unsqueeze(-1))
+
+    return epoch_loss, torch.tensor(predictions).to(device), torch.tensor(labels_list).to(device)
 
 
-def valid_epoch(model, loader, loss_fn):
+def val_epoch(model, loader, loss_fn):
     model.eval()
     validation_loss = 0.
+    predictions = []
+    labels_list = []
     with torch.no_grad():
         for i, data in enumerate(tqdm(loader)):
             inputs, labels = data
@@ -119,7 +134,10 @@ def valid_epoch(model, loader, loss_fn):
             labels = labels.to(device)
             outputs = model(inputs)
             validation_loss += loss_fn(outputs, labels.float().unsqueeze(-1)).item()
-    return validation_loss
+            predictions.extend(torch.round(outputs))
+            labels_list.extend(labels.float().unsqueeze(-1))
+
+    return validation_loss, torch.tensor(predictions).to(device), torch.tensor(labels_list).to(device)
 
 
 def model_checkpoint(model, filename, checkpoints_dir: str = ".checkpoints"):
@@ -144,8 +162,11 @@ def train(namespace: argparse.Namespace, device: torch.device):
     )
     
     model = AffinityScoring().train().to(device)
-    optimizer = torch.optim.NAdam(model.parameters(), lr=namespace.lr)
+    if device.type == "cuda":
+        model = torch.nn.DataParallel(model)
+    optimizer = torch.optim.SGD(model.parameters(), lr=namespace.lr)
     loss_fn = torch.nn.BCELoss().to(device)
+    metric = BinaryAccuracy().to(device)
 
     train_pl_names, val_pl_names, test_pl_names = get_split_names(namespace.pockets_path,
                                                                   namespace.train_split_path,
@@ -165,27 +186,34 @@ def train(namespace: argparse.Namespace, device: torch.device):
                                               shuffle=False, oversample=False, sanitize=False)
 
     best_ranking_accuracy = 0.
-    best_epoch = 0.
+    best_epoch = 0
     early_stopping_patience = 5
 
     for epoch in range(namespace.epochs):
-        epoch_loss = train_epoch(model=model, loader=train_loader, optimizer=optimizer, loss_fn=loss_fn, device=device)
-        valid_loss = valid_epoch(model=model, loader=val_loader, loss_fn=loss_fn)
+        epoch_loss, train_predictions, train_labels = train_epoch(model=model, loader=train_loader,
+                                                                  optimizer=optimizer, loss_fn=loss_fn, device=device)
+        val_loss, val_predictions, val_labels = val_epoch(model=model, loader=val_loader, loss_fn=loss_fn)
+
         ranking_accuracy = evaluate_ranking(model, val_pl_complexes)
 
+        train_accuracy = metric(train_predictions, train_labels)
+        val_accuracy = metric(val_predictions, val_labels)
+
         if ranking_accuracy > best_ranking_accuracy:
-            best_ranking_accuracy = ranking_accuracy
+            best_ranking_accuracy = val_accuracy
             best_epoch = epoch
             model_checkpoint(model, "best_model.pth")
 
         wandb.log({
             "epoch": epoch,
             "train_loss": epoch_loss, 
-            "val_loss": valid_loss, 
+            "val_loss": val_loss,
+            "train_accuracy": train_accuracy,
+            "val_accuracy": val_accuracy,
             "ranking_accuracy": ranking_accuracy
         })
 
-        if best_epoch - epoch > early_stopping_patience:
+        if epoch - best_epoch > early_stopping_patience:
             logging.info(f"Early stopping at epoch {epoch}.")
             break
 
