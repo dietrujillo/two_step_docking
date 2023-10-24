@@ -36,8 +36,10 @@ def evaluate_ranking(model: torch.nn.Module, pl_complexes: list[ProteinLigandCom
                                  centroid_threshold=20)
         loader = DataLoader(dataset, batch_size=1, shuffle=False)
         predictions, labels = [], []
-        for item, label in loader:
-            prediction = model(item.to(device)).detach().cpu().numpy()
+        for data in loader:
+            data.to(device)
+            label = data["label"]
+            prediction = model(data).detach().cpu().numpy()
             predictions.append(prediction)
             labels.append(label)
         protein_results = sorted(tuple(zip(predictions, labels)), reverse=True)
@@ -105,12 +107,11 @@ def train_epoch(model, loader, optimizer, loss_fn, device):
     predictions = []
     labels_list = []
     for i, data in enumerate(tqdm(loader)):
-        inputs, labels = data
-        inputs = inputs.to(device)
-        labels = labels.to(device)
+        data.to(device)
+        labels = data["label"]
         optimizer.zero_grad()
 
-        outputs = model(inputs)
+        outputs = model(data)
         loss = loss_fn(outputs, labels.float().unsqueeze(-1))
         loss.backward()
         optimizer.step()
@@ -129,10 +130,9 @@ def val_epoch(model, loader, loss_fn):
     labels_list = []
     with torch.no_grad():
         for i, data in enumerate(tqdm(loader)):
-            inputs, labels = data
-            inputs = inputs.to(device)
-            labels = labels.to(device)
-            outputs = model(inputs)
+            data.to(device)
+            labels = data["label"]
+            outputs = model(data)
             validation_loss += loss_fn(outputs, labels.float().unsqueeze(-1)).item()
             predictions.extend(torch.round(outputs))
             labels_list.extend(labels.float().unsqueeze(-1))

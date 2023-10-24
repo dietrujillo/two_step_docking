@@ -165,6 +165,5 @@ class PDBBindDataset(Dataset):
             out["pocket_centroid"] = out["centroid"]
 
         if self.include_label:
-            label = self._compute_label(out)
-            return out, label
+            out["label"] = self._compute_label(out)
         return out
