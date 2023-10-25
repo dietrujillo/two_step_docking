@@ -18,31 +18,11 @@ from models.pocket_scoring.AffinityScoring import AffinityScoring
 from io_utils import read_ligand
 
 
-def evaluate_ranking(model: torch.nn.Module, pl_complexes: list[ProteinLigandComplex]):
-    model.eval()
+def evaluate_ranking(predictions, labels, names):
+    unique_names = set(names)
     correct_rank = []
-    pl_complex_names = set([c.name for c in pl_complexes])
-    for protein in pl_complex_names:
-        protein_complexes = []
-        for pl_complex in filter(lambda x: x.name == protein, pl_complexes):
-            try:
-                ligand = read_ligand(pl_complex.ligand_path, include_hydrogen=True, sanitize=False)
-                if ligand is not None:
-                    protein_complexes.append(pl_complex)
-            except OSError:
-                logging.warning(f"Could not read ligand for {pl_complex.name}. Skipping.")
-        dataset = PDBBindDataset(protein_complexes, include_label=True,
-                                 pocket_predictions_dir=namespace.p2rank_cache,
-                                 centroid_threshold=20)
-        loader = DataLoader(dataset, batch_size=1, shuffle=False)
-        predictions, labels = [], []
-        for data in loader:
-            data.to(device)
-            label = data["label"]
-            prediction = model(data).detach().cpu().numpy()
-            predictions.append(prediction)
-            labels.append(label)
-        protein_results = sorted(tuple(zip(predictions, labels)), reverse=True)
+    for protein_name in unique_names:
+        protein_results = sorted(tuple(filter(lambda x: x[2] == protein_name, zip(predictions, labels, names))), reverse=True)
         correct_rank.append((protein_results[0][1] == 1).item())
     return sum(correct_rank) / len(correct_rank)
 
@@ -64,8 +44,8 @@ def get_split_names(pockets_path: str, train_split_path: str, val_split_path: st
 
 def get_oversampler(dataset):
     labels = []
-    for _, label in dataset:
-        labels.append(label)
+    for item in dataset:
+        labels.append(item["label"])
     labels = torch.tensor(labels, dtype=torch.int32)
     label_counts = torch.bincount(labels)
     weights = [1 / label_counts[label] for label in labels]
@@ -96,7 +76,7 @@ def get_loader(pl_names: list[str], batch_size: int, pockets_path: str, ligands_
     dataset = PDBBindDataset(pl_complexes, include_label=True, include_hydrogen=include_hydrogen,
                              pocket_predictions_dir=p2rank_cache, centroid_threshold=centroid_threshold,
                              sanitize=sanitize)
-    loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle,
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle and not oversample,
                         sampler=(get_oversampler(dataset) if shuffle and oversample else None))
     return pl_complexes, loader
 
@@ -128,6 +108,7 @@ def val_epoch(model, loader, loss_fn):
     validation_loss = 0.
     predictions = []
     labels_list = []
+    names_list = []
     with torch.no_grad():
         for i, data in enumerate(tqdm(loader)):
             data.to(device)
@@ -136,8 +117,9 @@ def val_epoch(model, loader, loss_fn):
             validation_loss += loss_fn(outputs, labels.float().unsqueeze(-1)).item()
             predictions.extend(torch.round(outputs))
             labels_list.extend(labels.float().unsqueeze(-1))
+            names_list.extend(data["name"])
 
-    return validation_loss, torch.tensor(predictions).to(device), torch.tensor(labels_list).to(device)
+    return validation_loss, torch.tensor(predictions).to(device), torch.tensor(labels_list).to(device), names_list
 
 
 def model_checkpoint(model, filename, checkpoints_dir: str = ".checkpoints"):
@@ -177,7 +159,7 @@ def train(namespace: argparse.Namespace, device: torch.device):
                                                   pockets_path=namespace.pockets_path,
                                                   ligands_path=namespace.ligands_path,
                                                   p2rank_cache=namespace.p2rank_cache,
-                                                  shuffle=False, oversample=True, sanitize=False)
+                                                  shuffle=True, oversample=True, sanitize=False)
 
     val_pl_complexes, val_loader = get_loader(val_pl_names, namespace.batch_size,
                                               pockets_path=namespace.pockets_path,
@@ -192,9 +174,9 @@ def train(namespace: argparse.Namespace, device: torch.device):
     for epoch in range(namespace.epochs):
         epoch_loss, train_predictions, train_labels = train_epoch(model=model, loader=train_loader,
                                                                   optimizer=optimizer, loss_fn=loss_fn, device=device)
-        val_loss, val_predictions, val_labels = val_epoch(model=model, loader=val_loader, loss_fn=loss_fn)
+        val_loss, val_predictions, val_labels, val_names = val_epoch(model=model, loader=val_loader, loss_fn=loss_fn)
 
-        ranking_accuracy = evaluate_ranking(model, val_pl_complexes)
+        ranking_accuracy = evaluate_ranking(val_predictions, val_labels, val_names)
 
         train_accuracy = metric(train_predictions, train_labels)
         val_accuracy = metric(val_predictions, val_labels)
