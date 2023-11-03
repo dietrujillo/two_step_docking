@@ -58,11 +58,11 @@ def get_loader(pl_names: list[str], batch_size: int, pockets_path: str, ligands_
                sanitize: bool = True):
     pl_complexes = []
     for pl_name in pl_names:
-        for pocket in os.listdir(os.path.join(pockets_path, pl_name)):
-            try:
-                ligand = read_ligand(os.path.join(ligands_path, pl_name, f"{pl_name}_ligand.mol2"),
-                                     include_hydrogen=include_hydrogen, sanitize=sanitize)
-                if ligand is not None:
+        try:
+            ligand = read_ligand(os.path.join(ligands_path, pl_name, f"{pl_name}_ligand.mol2"),
+                                 include_hydrogen=include_hydrogen, sanitize=sanitize)
+            if ligand is not None:
+                for pocket in os.listdir(os.path.join(pockets_path, pl_name)):
                     pl_complexes.append(
                         ProteinLigandComplex(
                             name=pl_name,
@@ -70,8 +70,10 @@ def get_loader(pl_names: list[str], batch_size: int, pockets_path: str, ligands_
                             ligand_path=os.path.join(ligands_path, pl_name, f"{pl_name}_ligand.mol2")
                         )
                     )
-            except OSError:
+            else:
                 logging.warning(f"Could not read ligand for {pl_name}. Skipping.")
+        except OSError:
+            logging.warning(f"Could not read ligand for {pl_name}. Skipping.")
 
     dataset = PDBBindDataset(pl_complexes, include_label=True, include_hydrogen=include_hydrogen,
                              pocket_predictions_dir=p2rank_cache, centroid_threshold=centroid_threshold,
