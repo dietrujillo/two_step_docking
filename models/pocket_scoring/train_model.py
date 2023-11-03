@@ -97,7 +97,7 @@ def train_epoch(model, loader, optimizer, loss_fn, device):
         optimizer.step()
 
         epoch_loss += loss.item()
-        predictions.extend(torch.round(outputs))
+        predictions.extend(outputs)
         labels_list.extend(labels.float().unsqueeze(-1))
 
     return epoch_loss, torch.tensor(predictions).to(device), torch.tensor(labels_list).to(device)
@@ -115,7 +115,7 @@ def val_epoch(model, loader, loss_fn):
             labels = data["label"]
             outputs = model(data)
             validation_loss += loss_fn(outputs, labels.float().unsqueeze(-1)).item()
-            predictions.extend(torch.round(outputs))
+            predictions.extend(outputs)
             labels_list.extend(labels.float().unsqueeze(-1))
             names_list.extend(data["name"])
 
