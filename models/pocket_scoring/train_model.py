@@ -38,7 +38,7 @@ def get_split_names(pockets_path: str, train_split_path: str, val_split_path: st
             test_pl_names = list(filter(lambda x: x in all_pl_names, [name.strip() for name in test_file.readlines()]))
     else:
         train_pl_names, val_pl_names, test_pl_names = torch.utils.data.random_split(all_pl_names, lengths=[0.7, 0.2, 0.1])
-    print(f"{len(train_pl_names)=}, {len(val_pl_names)=}, {len(test_pl_names)=}")
+    logging.info(f"{len(train_pl_names)=}, {len(val_pl_names)=}, {len(test_pl_names)=}")
     return train_pl_names, val_pl_names, test_pl_names
 
 
@@ -128,7 +128,7 @@ def model_checkpoint(model, filename, checkpoints_dir: str = ".checkpoints"):
     checkpoint_path = os.path.join(checkpoints_dir, filename)
     os.makedirs(checkpoints_dir, exist_ok=True)
     torch.save(model.state_dict(), checkpoint_path)
-
+ 
 
 def train(namespace: argparse.Namespace, device: torch.device):
     

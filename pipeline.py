@@ -344,11 +344,7 @@ class TwoStepBlindDocking:
         return predictions
 
     def _evaluate_rmsd(self, pl_complex: ProteinLigandComplex, predicted_molecule_path: str):
-        try:
-            supplier = Chem.SDMolSupplier(predicted_molecule_path)
-            predicted_molecule = supplier.__getitem__(0)
-        except OSError:
-            predicted_molecule = None
+        predicted_molecule = read_ligand(predicted_molecule_path, include_hydrogen=False)
 
         if predicted_molecule is not None:
 
@@ -373,7 +369,7 @@ class TwoStepBlindDocking:
     def _evaluate_validity(self, pl_complex: ProteinLigandComplex, predicted_molecule_path: str):
         true_molecule_path = pl_complex.ligand_reference_path if pl_complex.ligand_reference_path is not None else pl_complex.ligand_path
         out = self.evaluator.bust([predicted_molecule_path], true_molecule_path, pl_complex.protein_path)
-        return out.sum(axis=1)[0]
+        return out.drop(columns=["rmsd_≤_2å"]).sum(axis=1)[0]
 
     def evaluate(self, pl_complexes: list[ProteinLigandComplex]) -> dict:
         logging.debug("Deleting previous prediction folder.")
@@ -399,11 +395,15 @@ class TwoStepBlindDocking:
                     rmsd_dict[pl_complex.name] = rmsd
                     validity_dict[pl_complex.name] = self._evaluate_validity(pl_complex, final_prediction_path)
 
+        rmsd_values = np.array(list(rmsd_dict.values()))
         results = {
-            "rmsd_under_1A": len(list(filter(lambda x: x <= 1, rmsd_dict.values()))) / len(rmsd_dict),
-            "rmsd_under_2A": len(list(filter(lambda x: x <= 2, rmsd_dict.values()))) / len(rmsd_dict),
-            "rmsd_under_5A": len(list(filter(lambda x: x <= 5, rmsd_dict.values()))) / len(rmsd_dict),
-            "valid_and_under_2A": len(list(filter(lambda x: x == 25, validity_dict.values()))) / len(validity_dict)
+            "rmsd_under_1A": len(list(filter(lambda x: x <= 1, rmsd_values))) / len(rmsd_dict),
+            "rmsd_under_2A": len(list(filter(lambda x: x <= 2, rmsd_values))) / len(rmsd_dict),
+            "rmsd_under_5A": len(list(filter(lambda x: x <= 5, rmsd_values))) / len(rmsd_dict),
+            "valid_and_under_1A": len(list(filter(lambda x: x[0] <= 1 and x[1] == 24, zip(rmsd_values, validity_dict.values())))) / len(validity_dict),
+            "valid_and_under_2A": len(list(filter(lambda x: x[0] <= 2 and x[1] == 24, zip(rmsd_values, validity_dict.values())))) / len(validity_dict),
+            "valid_and_under_5A": len(list(filter(lambda x: x[0] <= 5 and x[1] == 24, zip(rmsd_values, validity_dict.values())))) / len(validity_dict),
+            "rmsd_quantiles": np.quantile(rmsd_values, np.arange(0, 1, 0.05))
         }
 
         return results
