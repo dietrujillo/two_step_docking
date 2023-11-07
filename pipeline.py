@@ -94,7 +94,7 @@ class TwoStepBlindDocking:
         logging.debug("Generating p2rank input file")
         with open(p2rank_input_filename, "w") as file:
             for protein_path in proteins:
-                assert os.path.exists(protein_path)
+                assert os.path.exists(protein_path), f"{protein_path} cannot be found."
                 file.write(f"{os.path.relpath(protein_path, start=os.path.dirname(p2rank_input_filename))}\n")
 
         logging.debug("Generated p2rank input file.")
@@ -190,46 +190,47 @@ class TwoStepBlindDocking:
         :param pl_complexes: a list of protein-ligand complexes containing PDB ID, path to the protein .pdb
             and either path to the ligand .sdf or .mol2 or ligand SMILES.
         """
+        data = []
         shutil.rmtree(self.ranked_pockets_path)
-        logging.debug("Ranking individual pockets...")
-        for pl_complex in tqdm(pl_complexes):
+        for pl_complex in pl_complexes:
             os.makedirs(os.path.join(self.ranked_pockets_path, pl_complex.name))
             pockets = os.listdir(os.path.join(self.pockets_saved_path, pl_complex.name))
             if len(pockets) > 1:
-                data = []
-                pocket_predictions = []
                 for i, pocket in enumerate(pockets):
                     data.append(ProteinLigandComplex(name=f"{pl_complex.name}_{int(pocket.split('_')[1][:-4])}",
-                                                     protein_path=os.path.join(self.pockets_saved_path, pl_complex.name, pocket),
-                                                     ligand_path=pl_complex.ligand_path, ligand_smiles=pl_complex.ligand_smiles,
+                                                     protein_path=os.path.join(self.pockets_saved_path, pl_complex.name,
+                                                                               pocket),
+                                                     ligand_path=pl_complex.ligand_path,
+                                                     ligand_smiles=pl_complex.ligand_smiles,
                                                      ligand_reference_path=pl_complex.ligand_reference_path))
-                    dataset = PDBBindDataset(data, include_absolute_coordinates=False,
-                                             pocket_predictions_dir=f"{self.p2rank_cache_path}/p2rank_output")
-                    loader = DataLoader(dataset, shuffle=False, batch_size=self.scoring_batch_size)
-                    predictions = []
-                    for batch in loader:
-                        predictions.extend(self.pocket_scoring_module(batch))
-                for pocket_complex, prediction in zip(data, predictions):
-                    pocket_predictions.append(
-                        {"id": pocket_complex.name.split("_")[0], "pocket_num": pocket_complex.name.split("_")[1],
-                         "protein_path": pocket_complex.protein_path, "prediction": prediction})
-                pocket_predictions = pd.DataFrame(pocket_predictions)
-                pocket_predictions["ranking"] = pocket_predictions["prediction"].rank(ascending=True)
-                pocket_predictions.sort_values(by=["ranking"], ascending=True, inplace=True)
-                pocket_predictions["ranked_protein_path"] = pocket_predictions.apply(
-                    lambda row: os.path.join(self.ranked_pockets_path,
-                                             row["id"],
-                                             f"{row['id']}_{row['pocket_num']}_rank{int(row['ranking'])}.pdb"),
-                    axis=1
-                )
-
-                for _, _, _, protein_path, _, _, ranked_protein_path in pocket_predictions.itertuples():
-                    shutil.copyfile(protein_path, ranked_protein_path)
             else:
                 shutil.copyfile(os.path.join(self.pockets_saved_path, pl_complex.name, pockets[0]),
                                 os.path.join(self.ranked_pockets_path, pl_complex.name,
                                              f"{pockets[0][:-4]}_rank1.pdb"))
 
+        logging.info("Running ligand-dependent pocket scoring model...")
+        dataset = PDBBindDataset(data, include_absolute_coordinates=False)
+        loader = DataLoader(dataset, shuffle=False, batch_size=self.scoring_batch_size)
+        predictions = []
+        for batch in tqdm(loader):
+            predictions.extend(self.pocket_scoring_module(batch))
+
+        logging.debug("Ranking individual pockets...")
+        pocket_predictions = []
+        for pl_complex, prediction in zip(data, predictions):
+            pocket_predictions.append({"id": pl_complex.name.split("_")[0], "pocket_num": pl_complex.name.split("_")[1],
+                                       "protein_path": pl_complex.protein_path, "prediction": prediction})
+        pocket_predictions = pd.DataFrame(pocket_predictions)
+        pocket_predictions["ranking"] = pocket_predictions.groupby("id")["prediction"].rank(ascending=True)
+        pocket_predictions.sort_values(by=["id", "ranking"], ascending=True, inplace=True)
+        pocket_predictions["ranked_protein_path"] = pocket_predictions.apply(
+            lambda row: os.path.join(self.ranked_pockets_path,
+                                     row["id"],
+                                     f"{row['id']}_{row['pocket_num']}_rank{int(row['ranking'])}.pdb"), axis=1
+        )
+
+        for _, _, _, protein_path, _, _, ranked_protein_path in pocket_predictions.itertuples():
+            shutil.copyfile(protein_path, ranked_protein_path)
         logging.debug("Finished ranking predicted pockets.")
 
     def check_ranked_pockets_in_cache(self, pl_complexes: list[ProteinLigandComplex]) -> bool:
