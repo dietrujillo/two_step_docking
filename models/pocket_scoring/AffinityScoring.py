@@ -13,24 +13,15 @@ class AffinityScoring(torch.nn.Module):
             torch.nn.Linear(128, 128),
             torch.nn.LeakyReLU()
         )
-        self.ligand_embedding = DimeNetPlusPlus(hidden_channels=128,
-                                                out_channels=128,
-                                                num_blocks=4,
-                                                int_emb_size=64,
-                                                basis_emb_size=8,
-                                                out_emb_channels=128,
-                                                num_spherical=7,
-                                                num_radial=6,
-                                                cutoff=5.0,
-                                                max_num_neighbors=32,
-                                                envelope_exponent=5,
-                                                num_before_skip=1,
-                                                num_after_skip=2,
-                                                num_output_layers=3)
+
+        self.ligand_embedding, _ = DimeNetPlusPlus.from_qm9_pretrained("dimenet_pretrained_save",
+                                                                       dataset=torch.zeros(130831), target=1)
+        self.ligand_embedding.output_blocks[-1].lin = torch.nn.Linear(256, 128)
         self.ligand_embedding_head = torch.nn.Sequential(
             torch.nn.Linear(128, 128),
             torch.nn.LeakyReLU()
         )
+
         self.mlp_head = torch.nn.Sequential(
             torch.nn.Linear(257, 64),
             torch.nn.LeakyReLU(),
